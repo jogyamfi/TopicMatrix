@@ -1,58 +1,70 @@
 Software Requirements Specification (SRS)
-Project Title: Subject Mastery & Spaced Repetition Tracking App
+Project Title: Subject Mastery & Study Competency Tracking System
 1. Executive Summary & Goals
 The objective of this application is to allow users to structure subjects into specific topics, track their study progress, test their recall against past/practice questions, and schedule automated periodic reviews (spaced repetition) to ensure long-term retention.
 2. User Roles & Personas
 •	Learner / Student: Primary user who creates subjects, inputs practice questions, records attempts/confidence scores, and receives review reminders.
 •	System (Automated): Calculates review intervals, tracks performance analytics, and pushes notifications.
+* Simple user login system stored in database. Admin ability to create users.
 3. Key Functional Requirements
 3.1 Subject & Topic Structure Management
-•	FR-1.1: The user must be able to create, edit, rename, and delete Subjects (e.g., Mathematics, Organic Chemistry, Constitutional Law).
-•	FR-1.2: Within each Subject, the user must be able to create hierarchical Topics / Sub-topics or tag content flexibly.
-•	FR-1.3: Each Topic should display a summary status (e.g., Not Started, In Progress, Needs Review, Mastered).
-3.2 Question & Flashcard Repository
-•	FR-2.1: Users can add practice/past questions assigned to specific Topics.
-•	FR-2.2: Question fields must support:
-o	Question Text / Prompt (with rich text/LaTeX support for math/science notation).
-o	Answer / Mark Scheme (hidden until revealed).
-o	Source / Year (e.g., 2023 Exam Q4).
-o	Attachments (images, diagrams, PDFs).
-o	Difficulty Level (e.g., Easy, Medium, Hard).
-3.3 Study & Testing Engine (Spaced Repetition)
-•	FR-3.1 Self-Testing Mode:
-o	Displays a question without showing the answer.
-o	Allows the user to reveal the sample answer/solution.
-o	Prompts the user to grade their response (e.g., Incorrect/Again, Hard, Good, Easy OR a score from 1–5).
-•	FR-3.2 Scheduling Algorithm:
+•	The user must be able to create, edit, rename, and delete Subjects (e.g., Mathematics, Organic Chemistry, Constitutional Law).
+•	Within each Subject, the user must be able to create hierarchical Topics / Sub-topics or tag content flexibly.
+•	Each Topic should display a summary status (e.g., Not Started, In Progress, Needs Review, Mastered).
+3.2 Subject Competency Tracking
+•	Users can add the results of a quiz session to a sub topic. 
+•	This data point will include Date, Source / Year of question/ Number of questions / Number solved correctly, Confidence tracking (•  1 = Guessing 
+•  2 = Somewhat know it 
+•  3 = Mostly know it 
+•  4 = Strong understanding 
+•  5 = Expert level confidence
+)
+
+
+•FR-3.2 Scheduling Algorithm:
 o	Uses a spaced repetition algorithm (e.g., SuperMemo SM-2 or FSRS) to automatically calculate the next review date based on the user's score.
 o	Supports Custom Scheduling Intervals set manually by the user (e.g., Review after 1 day, 3 days, 7 days, 14 days, 30 days).
 •	FR-3.3 Custom Study Sessions:
 o	Ability to launch a quick review session filtered by:
 	Subject or Topic
-	Questions due today
+	Sub Topics to work on due today
 	Weakest questions/topics (lowest score history)
 3.4 Progress Analytics & Dashboard
 •	FR-4.1 Mastery Level Indicator: Visual representation (bar chart, heat map, or radar chart) showing mastery score per topic/subject based on question accuracy history.
 •	FR-4.2 Review Queue: Daily dashboard showing questions/topics scheduled for review today, upcoming, or overdue.
 •	FR-4.3 Streak & Activity Tracking: Displays study frequency, questions answered per day/week, and total study time.
-3.5 Notifications & Reminders
-•	FR-5.1: Push notifications or email reminders when review items become due.
-•	FR-5.2: Customizable daily study goal reminders (e.g., "You have 15 practice questions to review today").
-4. Non-Functional Requirements
-•	Performance: Question review screens must load instantly (< 1 second) to maintain fluid user experience.
-•	Data Privacy & Sync: Multi-device synchronization (Web / Mobile) with offline support so users can practice without an active internet connection.
-•	Usability: Keyboard shortcuts for rapid scoring (e.g., Space to reveal answer, 1-4 to rate confidence).
+
+
+Topic Health View
+For every topic:
+Show:
+•	Competency score
+•	Last reviewed
+•	Next review date
+•	Accuracy %
+•	Confidence %
+•	Review trend
+Status:
+•	🟢 Strong
+•	🟡 Needs review
+•	🔴 At risk
+10. Analytics
+Knowledge Retention Curve
+Visualizes:
+•	Learning progress
+•	Forgetting patterns
+•	Recovery after review
+Topic Heatmap
+Shows:
+•	Strong topics
+•	Weak topics
+•	Neglected topics
+
 5. Proposed Technology Stack Options
 
 Component	Recommended Tech Stack
-Frontend	React / React Native or Flutter (for cross-platform Web & Mobile)
-Backend	Node.js (Express) / Python (FastAPI)
-Database	PostgreSQL (Relational mapping for Subjects → Topics → Questions)
-Search & Analytics	Elasticsearch or PostgreSQL Full-Text Search
-6. Questions to Refine Requirements
-To tailor this document further for your specific build, consider the following questions:
-1.	Format of Questions: Do you prefer simple text questions, or will you need support for rich media (images, diagrams, LaTeX for mathematical formulas, or code blocks)?
-2.	Interval Calculation: Would you prefer a standard Spaced Repetition System (SRS) like Anki’s SuperMemo/FSRS algorithm (where the system automatically handles intervals based on memory decay), or strictly user-defined fixed intervals (e.g., exact set days like Day 1, Day 3, Day 7)?
-3.	Question Sources: Will users manually type/paste questions, or do you want feature support to import questions via CSV/JSON, or auto-generate them via AI (LLM integration)?
-4.	Target Platform: Are you aiming for a Mobile App (iOS/Android), a Web App, or both?
+Frontend	React 
+Backend	Node.js  
+Database	PostgreSQL (Relational mapping for Subjects → Topics → Questions) and SQLlite. Ability to switch between them for developers
+
 
