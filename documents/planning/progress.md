@@ -380,3 +380,98 @@ not runtime-tested here" status; Cloudflare Workers path has a real, documented 
   Argon2id implementations) before touching anything else Workers-auth-related — the D1
   repositories, D1 `UnitOfWork`, and now Argon2id are the three things P11 must wire for real.
 
+## P3 — Core Domain Engine
+
+**Status:** Complete. Ran independently of P1/P2 as planned; no dependency on either.
+
+### What shipped
+
+- **`packages/core`** — zero I/O, zero runtime dependency other than `ts-fsrs`; every function
+  takes `asOfDate`/`reviewedOn` explicitly, never reads the clock. 66 unit tests (97% line
+  coverage on `packages/core`, self-verified locally with `@vitest/coverage-v8` — see Deferred;
+  well clear of NF-6's 90% target).
+- **Competency scoring (§7)**, `src/scoring.ts`: `computeCompetencyScore` (recency/accuracy/
+  confidence-weighted composite, §7.1) returns `null` — never `0` — for zero sessions, and an
+  `isProvisional` flag while fewer than 3 sessions exist (§7.2). `computeRollupScore` (§7.3),
+  `computeHealthStatus` (§7.4), `computeProgressStatus` (§7.5), plus `roundScoreForStorage`
+  (1dp)/`roundScoreForDisplay` (integer) and `validateScoringWeights`. Table-driven tests include
+  the boundary cases the plan calls out by name (accuracy exactly 0.40/0.90, recency component
+  exactly `exp(-1)` when overdue equals the interval) and a monotonicity property test.
+- **Outcome → grade mapping (§8.1, FR-5.4)**, `src/grade.ts`: `computeGrade`, evaluated in an
+  explicit order (accuracy floor → easy ceiling → good → hard) to resolve the two cases where the
+  table's conditions overlap — documented in the module's own comments, tested at every named
+  boundary (`p` = 0.45/0.65/0.85, `a` = 0.40/0.90).
+- **Schedulers (§8.2-8.5)**, `src/schedulers/`: `fsrsScheduler` (thin `ts-fsrs` wrapper, requested
+  retention 0.90), `sm2Scheduler` (hand-written, EF floor 1.3, verified against the classic
+  all-"Good" SuperMemo-2 worked example — EF constant at 2.5, intervals 1/6/15/38...), `manualScheduler`
+  (ladder from `SchedulerSettings.manualIntervals`, falling back to `packages/shared`'s
+  `DEFAULT_MANUAL_INTERVALS`). `schedulers/registry.ts` maps `Algorithm` → `Scheduler`; adding a
+  4th algorithm is one file plus one registry entry (FR-5.8).
+- **Replay (§8.6)**, `src/replay.ts`: `replaySchedule` folds a topic's full session history,
+  sorted chronologically, through a `Scheduler` from a null initial state. `resolveSessionGrade`
+  prefers a persisted `gradeUsed` override over the computed grade (FR-5.4). Property-tested:
+  order-independent (sessions passed out of order replay identically), idempotent, and
+  prefix-then-remainder equals replaying the whole history — for all three schedulers.
+- **FSRS verification**: rather than hand-transcribing `ts-fsrs`'s internal fixtures (not
+  practically extractable from outside the library), `fsrs-scheduler.test.ts` drives a mixed-grade
+  sequence through both `fsrsScheduler` and a directly-constructed `ts-fsrs` engine with identical
+  parameters, asserting the wrapper's stability/difficulty/interval/reps/lapses match at every
+  step. This catches wrapper bugs (wrong field mapping, wrong `Card` reconstruction, wrong
+  rounding) without re-deriving FSRS's own math.
+
+### Decisions taken (read before touching scheduling/scoring again)
+
+- **`Scheduler.id` uses `packages/shared`'s lower-case `Algorithm` union** (`'fsrs'|'sm2'|'manual'`,
+  also `ReviewSchedule.algorithm`'s stored string) instead of the SRS §8.5 pseudocode's illustrative
+  `'FSRS'|'SM2'|'MANUAL'` casing — one spelling of the three identifiers, not two.
+- **FSRS runs with `enable_short_term: false` and `enable_fuzz: false`**, not `ts-fsrs`'s own
+  defaults. Short-term/Anki-style learning steps (minutes-granularity) are meaningless against a
+  date-only `studiedOn`/`nextReviewOn` schema (§6.3); fuzz would break replay's determinism
+  (§8.6/NF-6). `FSRS_REQUESTED_RETENTION = 0.90` per §8.2; there is no per-user override for it in
+  `UserSettings` (only `manualIntervalsJson`/weights/thresholds are user-tunable, FR-8.1/8.2).
+- **FSRS interval floor of 1 day**: `fsrsScheduler` clamps `scheduled_days` to `>= 1`, since a
+  date-only system can't represent "review again later today". Same floor is implicit in SM-2/
+  Manual by construction.
+- **`ScheduleState` is one shared shape across all three algorithms**, deliberately matching
+  `ReviewSchedule`'s scheduling columns 1:1 (`lastReviewedOn`, `intervalDays`, `repetitions`,
+  `lapses`, `easeFactor`, `stability`, `difficulty`, `manualLadderIndex`) — each algorithm only
+  populates its own fields, leaving the rest `null`. This is what makes swapping a topic's
+  algorithm (FR-5.7) a matter of re-running replay with a different `Scheduler`, not a schema
+  migration.
+- **Roll-up (§7.3) fallback**: when every scored descendant's trailing-180-day question count is
+  zero (there's history, just none recent), `computeRollupScore` falls back to an unweighted mean
+  rather than returning `null`. The SRS doesn't specify this edge case; flagged for P4/P9 to
+  confirm it reads right once it's on screen.
+- **Progress status (§7.5) ordering**: a topic can satisfy both "due today" and "Mastered"
+  simultaneously (a long stable interval elapsing *is* what due means); `computeProgressStatus`
+  resolves this by returning `needsReview` first, since that's the actionable state. Also flagged
+  for P7/P9 to confirm against the actual UI.
+
+### Deferred / not in scope for P3
+
+- **No CI coverage gate** — NF-6's "enforced in CI" half is explicitly a P10 task (see the
+  requirement coverage map). This phase only self-verified ≥90% line coverage locally
+  (`@vitest/coverage-v8`, installed with `--no-save` and not committed — add it for real, and wire
+  the gate, at P10).
+- **FSRS interval ceiling (open question Q3)** — `maximum_interval` was left at `ts-fsrs`'s own
+  default; deciding on a product-specific ceiling is explicitly a P5 task per the plan's open
+  questions table.
+- Everything about *wiring* scoring/scheduling into the API (persisting `ScheduleState` into
+  `ReviewSchedule`, computing `questionsAttempted180d` for roll-up, deriving `overdueDays`/
+  `daysSinceLastSession`/`isDueOrOverdue`/`lapseInLastThreeSessions` from real data) is P4/P5
+  scope, per the plan — P3 only had to make the pure functions correct and testable.
+
+### Handover to P4/P5
+
+- `packages/core`'s public surface (barrel: `src/index.ts`) is the complete P3 deliverable:
+  `computeCompetencyScore`, `computeRollupScore`, `computeHealthStatus`, `computeProgressStatus`,
+  `computeGrade`, `getScheduler`/`schedulerRegistry`, `replaySchedule`, `resolveSessionGrade`, and
+  the `ScheduleState`/`SchedulerSettings`/`Scheduler` types. P5 (the phase that actually persists
+  `ReviewSchedule` and `CompetencySnapshot`) is the first consumer.
+- P4/P5 own translating real `Topic`/`StudySession`/`ReviewSchedule` rows into this package's input
+  shapes (`ScoringSessionInput`, `ReplaySessionInput`, `TopicScoreForRollup`, `HealthStatusInput`,
+  `ProgressStatusInput`) — none of those exist as DB-shaped types in `packages/core` on purpose,
+  to keep it decoupled from `packages/db`.
+- The two flagged judgment calls above (roll-up zero-weight fallback, progress-status ordering)
+  are the two most likely things to need revisiting once real data and a real UI exist.
+
