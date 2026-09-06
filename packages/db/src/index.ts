@@ -12,6 +12,8 @@ export { resolveAlgorithm, recalculateTopicSchedule, applyScheduleOverride } fro
 export type { RecalculationResult, ScheduleOverride } from './scheduling.js';
 export { computeSubjectTopicMetrics, computeTopicMetrics } from './topic-metrics.js';
 export type { TopicScoreMetrics } from './topic-metrics.js';
+export { computeSubjectSummary } from './subject-summary.js';
+export type { SubjectSummary } from './subject-summary.js';
 
 export type {
   PrismaClient,

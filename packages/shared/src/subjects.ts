@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { algorithmSchema } from './domain.js';
+import { topicTreeNodeSchema } from './topics.js';
 
 // Single source of truth for Subject request shapes (P4) — types are inferred, never
 // hand-written twice.
@@ -28,3 +29,43 @@ export const deleteSubjectRequestSchema = z.object({
   confirm: z.literal(true),
 });
 export type DeleteSubjectRequest = z.infer<typeof deleteSubjectRequestSchema>;
+
+// Response shapes (P7) — mirrors packages/api-core/src/routes/subjects.ts's toSubjectView.
+export const subjectViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  colour: z.string().nullable(),
+  icon: z.string().nullable(),
+  sortOrder: z.number(),
+  isArchived: z.boolean(),
+  defaultAlgorithm: algorithmSchema.nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SubjectView = z.infer<typeof subjectViewSchema>;
+
+// Subject-card summary (FR-2.5) — topic count, aggregate competency, due-today count, last
+// activity date. See packages/db/src/subject-summary.ts.
+export const subjectSummarySchema = z.object({
+  topicCount: z.number(),
+  aggregateScore: z.number().nullable(),
+  dueTodayCount: z.number(),
+  lastActivityOn: z.string().nullable(),
+});
+export type SubjectSummary = z.infer<typeof subjectSummarySchema>;
+
+export const subjectListItemSchema = subjectViewSchema.extend({ summary: subjectSummarySchema });
+export type SubjectListItem = z.infer<typeof subjectListItemSchema>;
+
+export const subjectsListResponseSchema = z.object({ subjects: z.array(subjectListItemSchema) });
+export type SubjectsListResponse = z.infer<typeof subjectsListResponseSchema>;
+
+export const subjectResponseSchema = z.object({ subject: subjectViewSchema });
+export type SubjectResponse = z.infer<typeof subjectResponseSchema>;
+
+export const subjectTreeResponseSchema = z.object({
+  subject: subjectViewSchema,
+  tree: z.array(topicTreeNodeSchema),
+});
+export type SubjectTreeResponse = z.infer<typeof subjectTreeResponseSchema>;

@@ -226,6 +226,20 @@ export function registerSessionRoutes(app: Hono<AppEnv>): void {
     return c.json({ status: 'ok', schedule: toScheduleView(recalculation.schedule) });
   });
 
+  // Standalone schedule read (P7) — deferred at P5 pending a real consumer; the topic detail
+  // page is the first one that needs "next review" independent of a session write's response.
+  app.get('/topics/:id/schedule', requireAuth, requirePasswordChanged, async (c) => {
+    const deps = c.get('deps');
+    const user = getAuthUser(c);
+    const topicId = c.req.param('id');
+    const topic = await deps.db.topics.findById(user.id, topicId);
+    if (!topic) {
+      throw new AppError('NOT_FOUND', 'Topic not found');
+    }
+    const schedule = await deps.db.reviewSchedules.find(user.id, topicId);
+    return c.json({ schedule: toScheduleView(schedule) });
+  });
+
   // Snapshot history for the retention curve, date-range filterable (FR-7.7's data source).
   app.get('/topics/:id/history', requireAuth, requirePasswordChanged, async (c) => {
     const deps = c.get('deps');

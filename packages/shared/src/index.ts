@@ -16,6 +16,7 @@ export {
   algorithmSchema,
   themeSchema,
   topicDeleteModeSchema,
+  healthStatusSchema,
   manualIntervalsSchema,
   DEFAULT_MANUAL_INTERVALS,
   parseManualIntervals,
@@ -26,6 +27,7 @@ export type {
   Algorithm,
   Theme,
   TopicDeleteMode,
+  HealthStatus,
   ManualIntervals,
 } from './domain.js';
 export { MIN_PASSWORD_LENGTH, COMMON_PASSWORDS, validatePassword } from './password-policy.js';
@@ -61,35 +63,95 @@ export {
   createSubjectRequestSchema,
   updateSubjectRequestSchema,
   deleteSubjectRequestSchema,
+  subjectViewSchema,
+  subjectSummarySchema,
+  subjectListItemSchema,
+  subjectsListResponseSchema,
+  subjectResponseSchema,
+  subjectTreeResponseSchema,
 } from './subjects.js';
 export type {
   CreateSubjectRequest,
   UpdateSubjectRequest,
   DeleteSubjectRequest,
+  SubjectView,
+  SubjectSummary,
+  SubjectListItem,
+  SubjectsListResponse,
+  SubjectResponse,
+  SubjectTreeResponse,
 } from './subjects.js';
 export {
   createTopicRequestSchema,
   updateTopicRequestSchema,
   moveTopicRequestSchema,
   deleteTopicRequestSchema,
+  topicMetricsSchema,
+  topicViewSchema,
+  topicsListResponseSchema,
+  topicResponseSchema,
+  topicTreeNodeSchema,
 } from './topics.js';
 export type {
   CreateTopicRequest,
   UpdateTopicRequest,
   MoveTopicRequest,
   DeleteTopicRequest,
+  TopicMetrics,
+  TopicView,
+  TopicsListResponse,
+  TopicResponse,
+  TopicTreeNodeView,
 } from './topics.js';
-export { createTagRequestSchema } from './tags.js';
-export type { CreateTagRequest } from './tags.js';
+export {
+  createTagRequestSchema,
+  tagViewSchema,
+  tagsListResponseSchema,
+  tagResponseSchema,
+  topicSummaryViewSchema,
+  topicsForTagResponseSchema,
+} from './tags.js';
+export type {
+  CreateTagRequest,
+  TagView,
+  TagsListResponse,
+  TagResponse,
+  TopicSummaryView,
+  TopicsForTagResponse,
+} from './tags.js';
 export {
   createStudySessionRequestSchema,
   updateStudySessionRequestSchema,
   sessionPreviewRequestSchema,
+  studySessionViewSchema,
+  sessionsListResponseSchema,
+  sessionResponseSchema,
+  sessionDeleteResponseSchema,
+  sessionPreviewResponseSchema,
+  snapshotViewSchema,
+  historyResponseSchema,
 } from './sessions.js';
 export type {
   CreateStudySessionRequest,
   UpdateStudySessionRequest,
   SessionPreviewRequest,
+  StudySessionView,
+  SessionsListResponse,
+  SessionResponse,
+  SessionDeleteResponse,
+  SessionPreviewResponse,
+  SnapshotView,
+  HistoryResponse,
 } from './sessions.js';
-export { scheduleOverrideRequestSchema } from './schedule.js';
-export type { ScheduleOverrideRequest } from './schedule.js';
+export {
+  scheduleOverrideRequestSchema,
+  reviewScheduleViewSchema,
+  scheduleOverrideResponseSchema,
+  scheduleResponseSchema,
+} from './schedule.js';
+export type {
+  ScheduleOverrideRequest,
+  ReviewScheduleView,
+  ScheduleOverrideResponse,
+  ScheduleResponse,
+} from './schedule.js';

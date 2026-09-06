@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { algorithmSchema, topicDeleteModeSchema } from './domain.js';
+import { algorithmSchema, healthStatusSchema, topicDeleteModeSchema } from './domain.js';
 
 // Single source of truth for Topic request shapes (P4) — types are inferred, never
 // hand-written twice.
@@ -46,3 +46,71 @@ export const deleteTopicRequestSchema = z.object({
   mode: topicDeleteModeSchema,
 });
 export type DeleteTopicRequest = z.infer<typeof deleteTopicRequestSchema>;
+
+// Response shapes (P7) — mirrors packages/api-core/src/routes/topics.ts's toTopicView and
+// topic-tree-view.ts's TopicMetricsView/TopicTreeNode. Own vs aggregate competency (FR-3.8).
+export const topicMetricsSchema = z.object({
+  ownScore: z.number().nullable(),
+  aggregateScore: z.number().nullable(),
+  ownHealthStatus: healthStatusSchema.nullable(),
+  aggregateHealthStatus: healthStatusSchema.nullable(),
+});
+export type TopicMetrics = z.infer<typeof topicMetricsSchema>;
+
+export const topicViewSchema = z.object({
+  id: z.string(),
+  subjectId: z.string(),
+  parentId: z.string().nullable(),
+  name: z.string(),
+  notes: z.string().nullable(),
+  sortOrder: z.number(),
+  depth: z.number(),
+  algorithmOverride: algorithmSchema.nullable(),
+  isSuspended: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  metrics: topicMetricsSchema,
+});
+export type TopicView = z.infer<typeof topicViewSchema>;
+
+export const topicsListResponseSchema = z.object({ topics: z.array(topicViewSchema) });
+export type TopicsListResponse = z.infer<typeof topicsListResponseSchema>;
+
+export const topicResponseSchema = z.object({
+  topic: topicViewSchema,
+  scheduleChanged: z.boolean().optional(),
+});
+export type TopicResponse = z.infer<typeof topicResponseSchema>;
+
+// Recursive tree node (GET /subjects/:id/tree) — z.lazy is required for the self-referential
+// `children` field; the explicit z.ZodType<TopicTreeNodeView> annotation is required alongside
+// it, since zod can't infer a recursive schema's type on its own.
+export interface TopicTreeNodeView {
+  id: string;
+  subjectId: string;
+  parentId: string | null;
+  name: string;
+  notes: string | null;
+  sortOrder: number;
+  depth: number;
+  algorithmOverride: z.infer<typeof algorithmSchema> | null;
+  isSuspended: boolean;
+  metrics: TopicMetrics;
+  children: TopicTreeNodeView[];
+}
+
+export const topicTreeNodeSchema: z.ZodType<TopicTreeNodeView> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    subjectId: z.string(),
+    parentId: z.string().nullable(),
+    name: z.string(),
+    notes: z.string().nullable(),
+    sortOrder: z.number(),
+    depth: z.number(),
+    algorithmOverride: algorithmSchema.nullable(),
+    isSuspended: z.boolean(),
+    metrics: topicMetricsSchema,
+    children: z.array(topicTreeNodeSchema),
+  }),
+);

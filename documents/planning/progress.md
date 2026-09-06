@@ -902,5 +902,155 @@ forced password change, dashboard, dark theme, and the full admin user CRUD cycl
   worth checking), extend `NON_REDIRECT_TARGETS` in `login-page.tsx` rather than special-casing it
   elsewhere.
 
+## P7 — Subjects & Topics UI
+
+**Status:** Complete. Verified via `npm run typecheck`, `npm run lint`, `npm test` (132 passed),
+`npm run test:integration` (84 passed), `npm run test:cf` (5 passed, Worker bundle unaffected —
+89.2 KiB gzip), and a production `npm run build -w apps/web` (each new page its own chunk, per
+P6's code-splitting convention).
+
+### What shipped
+
+- **Response schemas added to `packages/shared`** for every P4/P5 endpoint that previously had
+  none (subjects, topics, tags, sessions, schedule) — extends P6's "response shapes live in
+  `packages/shared`, parsed at the API-client boundary" convention from auth/admin-users to
+  everything P7 needed. Notably `topicTreeNodeSchema` (`packages/shared/src/topics.ts`) is a
+  genuinely **recursive** Zod schema (`z.lazy` + an explicit `z.ZodType<TopicTreeNodeView>`
+  annotation, since Zod can't infer a self-referential schema's type on its own) — the first one
+  in the codebase.
+- **Two small, justified backend additions**, both explicitly flagged as "add when a real
+  consumer needs it" in earlier phases' handover notes:
+  - `GET /topics/:id/schedule` (`packages/api-core/src/routes/sessions.ts`) — P5 deferred a
+    standalone schedule read pending a real consumer; the topic detail page's "next review" card
+    is the first one. Reuses the existing `db.reviewSchedules.find` and `toScheduleView`.
+  - `packages/db/src/subject-summary.ts`'s `computeSubjectSummary` — per-subject topic count,
+    aggregate competency, due-today count and last-activity date for the subject cards (FR-2.5).
+    `aggregateScore` is the **unweighted mean of the subject's root topics' `aggregateScore`**
+    (each root's own aggregate already covers its whole descendant subtree, and roots partition
+    every topic via the materialised path) — deliberately reuses `computeSubjectTopicMetrics`
+    rather than re-deriving `packages/core`'s roll-up math a second time. Wired into `GET
+    /subjects`'s list response (`subjectListItemSchema` = `subjectViewSchema` + `summary`).
+- **Subject list** (`pages/subjects/subjects-page.tsx`): cards with topic count/aggregate
+  score/due-today/last-activity, a colour swatch + emoji icon picker (`subject-appearance.ts` —
+  a small curated palette, not a full colour/emoji-picker dependency), create/edit
+  (`subject-dialog.tsx`) and typed-name-confirmation delete (`delete-subject-dialog.tsx`, same
+  pattern as P2's admin-user delete).
+- **Topic tree view** (`pages/subjects/subject-tree-page.tsx` + `topic-tree-node.tsx`): fully
+  recursive, expand/collapse state persisted to `localStorage` per subject
+  (`topictree:collapsed:<subjectId>`), inline rename (click pencil → input, Enter/Escape/blur),
+  inline "add child"/"add root topic" via `create-topic-dialog.tsx`. Every row's action set (log
+  session, add sub-topic, rename, move, delete, reorder up/down) is **always visible**, not
+  hover-revealed — a deliberate accessibility choice (hover-only reveal is a known keyboard-a11y
+  antipattern; see NF-4). Depth warning (FR-3.2) is a non-blocking amber icon + tooltip at
+  `depth >= 6`.
+- **Drag-and-drop + keyboard alternative (FR-3.4/3.5, NF-4, task 3)** — a deliberate scope
+  decision, not the originally-listed `dnd-kit`:
+  - **Re-parenting** uses native HTML5 drag-and-drop (`draggable`, `dragstart`/`dragover`/`drop`
+    events) — dropping a row onto another row re-parents it as that node's child; dropping in the
+    tree's empty background re-parents to the subject's top level. No new dependency needed.
+  - **Reordering** among siblings uses explicit "move up"/"move down" icon buttons (swap
+    `sortOrder` with the adjacent sibling via two `POST /topics/:id/move` calls) rather than
+    drag-based reordering — avoids the fractional-indexing problem of computing a new `sortOrder`
+    between two existing integers when dropped mid-list, and is keyboard-operable by construction.
+  - **`move-topic-dialog.tsx`** is the required keyboard-accessible alternative to drag-and-drop
+    (NF-4) — two plain `Select`s (target subject, target parent, indented by depth), supporting
+    cross-subject moves (FR-3.5) that dragging within one subject's tree view can't reach anyway.
+    Excludes the dragged topic and its own descendants from the parent list client-side (the
+    server's `TOPIC_CYCLE` check is still the source of truth).
+- **Delete topic dialog** (`delete-topic-dialog.tsx`, FR-3.6): cascade vs promote, with the
+  descendant count computed client-side from the already-loaded tree (`countDescendants`) —
+  exact affected **session** counts are not shown (would need either a new endpoint or an
+  N-topic fan-out of queries just for a delete confirmation dialog; deferred, see below).
+- **Log Session dialog** (`pages/topics/log-session-dialog.tsx`, FR-4.5/FR-5.4, G2 — under 20
+  seconds): date defaults to today, questions-attempted auto-focused, live accuracy display,
+  `ConfidenceScale` (`components/confidence-scale.tsx`, the labelled 1–5 control, FR-4.5's exact
+  wording), a live grade preview (`POST /topics/:id/sessions/preview`, refetched via a
+  `useQuery` keyed on the three inputs — cheap enough locally that no manual debounce was
+  needed) with a tappable override, notes collapsed behind a "+ Add notes" toggle, submit on
+  Enter. Reused unmodified from both the topic tree row's "Log" action and the topic detail page.
+- **Session history table** (`pages/topics/session-history-table.tsx`, FR-4.6): sortable
+  (date/questions/accuracy/confidence, click-to-toggle direction) and paginated (10/page),
+  inline edit (`edit-session-dialog.tsx`) and delete (`delete-session-dialog.tsx`), both
+  triggering `invalidations.afterSessionWrite` (invalidates the whole subject tree, since a
+  session write changes the topic's own score **and** every ancestor's roll-up).
+- **Topic detail page** (`pages/topics/topic-detail-page.tsx`, task 8): name/notes with an edit
+  dialog (`edit-topic-dialog.tsx`, also handles algorithm override — warns via toast when
+  `scheduleChanged` comes back `true`), own vs aggregate competency cards, a "next review" card
+  (algorithm + date, from the new schedule endpoint), a pause/resume-reviews button (the schedule
+  override `suspend` action, FR-5.10), inline tag attach/detach/create, log-session entry point,
+  and the session history table.
+- **Tags** (`pages/tags/tags-page.tsx`, FR-3.9, task 9): create/delete, and a cross-subject
+  filter — selecting a tag calls `GET /tags/:id/topics` and lists every topic carrying it across
+  every subject, each linking straight through to its topic detail page.
+- New shared UI pieces: `components/ui/textarea.tsx` (P6 had no textarea primitive yet),
+  `components/confidence-scale.tsx`.
+- `queryKeys`/`invalidations` (`lib/query-client.ts`/`lib/invalidations.ts`) extended per P6's
+  established convention — subject/topic/session/tag writes all invalidate the *whole subject
+  tree* (`queryKeys.subjects.tree`) rather than trying to track exactly which nodes' roll-ups
+  changed, since a session or topic write can change scores anywhere up the ancestor chain.
+
+### Deferred / not in scope for P7
+
+- **Tree virtualisation beyond ~200 visible nodes** (task 2's explicit ask) — no virtualisation
+  library (e.g. `react-window`) is in `apps/web`'s dependencies, and adding one carries the same
+  corporate-proxy install risk documented for other packages in repo memory. Given the acceptance
+  criteria only require a 3–5 level tree to work smoothly, this was deferred rather than adding a
+  new dependency speculatively. Revisit if a real large-tree performance problem is observed.
+- **Exact session counts in the delete-topic dialog** — only the descendant *topic* count is
+  shown (computed client-side from the loaded tree); showing exact session counts too would need
+  either a new bulk-count endpoint or an expensive per-topic fan-out purely for a confirmation
+  dialog. The cascade-vs-promote description is still accurate about what's affected, just not
+  numerically precise on sessions.
+- **A true global "log session" keyboard shortcut reachable from anywhere in the app** (task 6's
+  literal wording) — implemented instead as a "Log" action on every topic tree row and on the
+  topic detail page, which covers the G2 <20s/<6-interaction acceptance criterion for the actual
+  logging flow, but there is no single global hotkey that opens a topic picker from any screen.
+  Worth adding if usage shows this matters in practice.
+- **Manual subject reordering (FR-2.6)** and **bulk topic creation by paste (FR-3.11)** — both
+  marked deferrable-first (**C**) in the plan's own deferred-scope list; not built.
+- The **Topic.isSuspended** field (a P4-era `PATCH /topics/:id` field, separate from
+  `ReviewSchedule.isSuspended`) is editable via `edit-topic-dialog.tsx`'s update body but has no
+  dedicated UI control exposed — only the schedule-level "Pause/Resume reviews" button (which
+  toggles `ReviewSchedule.isSuspended` via the schedule-override endpoint) is surfaced
+  prominently. The two fields' exact intended semantic difference was never fully disambiguated
+  in any prior phase's notes; flagged here rather than guessing at new behaviour.
+- PostgreSQL/D1 remain in their inherited states (generated-but-unverified at runtime for
+  PostgreSQL; D1 repositories are P11 scope) — this phase didn't touch persistence internals
+  beyond the two additions above, both of which are provider-agnostic (`Db` interface calls).
+
+### Decisions taken
+
+- **Native HTML5 drag-and-drop instead of `dnd-kit`** for topic re-parenting, with sibling
+  reordering done via explicit up/down buttons instead of drag-based reordering — see the "What
+  shipped" section above for the full rationale (avoids a new dependency, sidesteps
+  fractional-indexing, and is keyboard-operable by construction rather than needing a parallel
+  keyboard implementation).
+- **Tree action buttons are always visible, never hover-revealed** — a deliberate NF-4 choice;
+  hover-only reveal of interactive controls is a keyboard-accessibility antipattern.
+- **Two small backend additions this phase** (`GET /topics/:id/schedule`,
+  `computeSubjectSummary`) rather than working around their absence in the frontend — both were
+  explicitly flagged in earlier phases' handover notes as "add when a real UI screen needs it",
+  and P7 is that screen. Both are thin, provider-agnostic reads with no new business logic.
+- **`invalidations.afterSessionWrite`/`afterTopicWrite` invalidate the whole subject's tree
+  query**, not a single topic's cache entry — correct given roll-up scores can change anywhere up
+  the ancestor chain, at the cost of slightly more refetching than a more surgical invalidation
+  would need. Revisit only if this proves to be a real performance problem.
+
+### Handover to P8+
+
+- The review queue (P8) will want a bulk "topics due today/overdow" query across *all* subjects —
+  P7's subject-card `dueTodayCount` and topic-detail's schedule read are both single-subject/
+  single-topic; P5's handover note already flagged `computeSubjectTopicMetrics`'s per-topic
+  `overdueDays` calculation as the piece to extract for a real cross-subject queue.
+- `LogSessionDialog`/`EditSessionDialog`/`SessionHistoryTable` are ready to be reused by P8's
+  launcher (log/skip/snooze one topic at a time) without modification — they only need a
+  `{ id, subjectId, name }` topic reference.
+- `GET /topics/:id/schedule` and `computeSubjectSummary` are the two new provider-agnostic reads
+  this phase added; P9's analytics screens and P8's queue are natural next consumers of similar
+  small, targeted reads rather than growing the existing list/tree endpoints further.
+- If P9 needs virtualisation for large lists (Topic Health View, FR-7.6, is likely to have more
+  rows than a topic tree), evaluate a virtualisation library then rather than retrofitting it
+  into the P7 tree — the corporate-proxy install risk noted above applies equally there.
+
 
 

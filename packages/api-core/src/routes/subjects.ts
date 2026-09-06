@@ -5,7 +5,12 @@ import {
   updateSubjectRequestSchema,
   deleteSubjectRequestSchema,
 } from '@topicmatrix/shared';
-import { deleteSubjectCascade, computeSubjectTopicMetrics, type Subject } from '@topicmatrix/db';
+import {
+  deleteSubjectCascade,
+  computeSubjectTopicMetrics,
+  computeSubjectSummary,
+  type Subject,
+} from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { parseJsonBody } from '../validation.js';
 import { getAuthUser, requireAuth, requirePasswordChanged } from '../middleware/auth.js';
@@ -48,7 +53,17 @@ export function registerSubjectRoutes(app: Hono<AppEnv>): void {
     const user = getAuthUser(c);
     const includeArchived = c.req.query('includeArchived') === 'true';
     const subjects = await deps.db.subjects.list(user.id, { includeArchived });
-    return c.json({ subjects: subjects.map(toSubjectView) });
+
+    // Topic count / aggregate competency / due-today / last-activity for each subject card
+    // (FR-2.5, P7 task 1) — computed per subject, not batched across subjects, since each is a
+    // small, independent bulk read (topics/sessions/schedules scoped to one subject).
+    const withSummary = await Promise.all(
+      subjects.map(async (subject) => ({
+        view: toSubjectView(subject),
+        summary: await computeSubjectSummary(deps.db, user.id, subject.id, deps.clock()),
+      })),
+    );
+    return c.json({ subjects: withSummary.map(({ view, summary }) => ({ ...view, summary })) });
   });
 
   app.post('/subjects', async (c) => {

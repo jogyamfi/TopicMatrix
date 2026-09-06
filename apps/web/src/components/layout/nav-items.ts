@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users } from 'lucide-react';
+import { BookOpen, LayoutDashboard, Tag, Users } from 'lucide-react';
 import type { Role } from '@topicmatrix/shared';
 
 export interface NavItem {
@@ -10,6 +10,8 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/subjects', label: 'Subjects', icon: BookOpen },
+  { to: '/tags', label: 'Tags', icon: Tag },
   { to: '/admin/users', label: 'Users', icon: Users, adminOnly: true },
 ];
 

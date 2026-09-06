@@ -20,6 +20,10 @@ const LoginPage = lazy(() => import('./pages/login-page'));
 const ChangePasswordPage = lazy(() => import('./pages/change-password-page'));
 const DashboardPage = lazy(() => import('./pages/dashboard-page'));
 const AdminUsersPage = lazy(() => import('./pages/admin/users-page'));
+const SubjectsPage = lazy(() => import('./pages/subjects/subjects-page'));
+const SubjectTreePage = lazy(() => import('./pages/subjects/subject-tree-page'));
+const TopicDetailPage = lazy(() => import('./pages/topics/topic-detail-page'));
+const TagsPage = lazy(() => import('./pages/tags/tags-page'));
 const NotFoundPage = lazy(() => import('./pages/not-found-page'));
 
 function PageFallback(): React.JSX.Element {
@@ -55,6 +59,14 @@ const router = createBrowserRouter(
           />
           <Route element={<RequirePasswordChanged />}>
             <Route index element={<DashboardPage />} handle={{ breadcrumb: 'Dashboard' }} />
+            <Route path="/subjects" element={<SubjectsPage />} handle={{ breadcrumb: 'Subjects' }} />
+            <Route path="/subjects/:subjectId" element={<SubjectTreePage />} handle={{ breadcrumb: 'Topic tree' }} />
+            <Route
+              path="/subjects/:subjectId/topics/:topicId"
+              element={<TopicDetailPage />}
+              handle={{ breadcrumb: 'Topic' }}
+            />
+            <Route path="/tags" element={<TagsPage />} handle={{ breadcrumb: 'Tags' }} />
             <Route element={<AdminRoute />}>
               <Route path="/admin/users" element={<AdminUsersPage />} handle={{ breadcrumb: 'Users' }} />
             </Route>

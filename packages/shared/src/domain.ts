@@ -15,6 +15,11 @@ export type Theme = z.infer<typeof themeSchema>;
 export const topicDeleteModeSchema = z.enum(['cascade', 'promote']);
 export type TopicDeleteMode = z.infer<typeof topicDeleteModeSchema>;
 
+// Mirrors packages/core's HealthStatus union (§7.4) — health is never colour-only (NF-4), so the
+// web app pairs every one of these with an icon + text label (HealthStatusBadge, P6).
+export const healthStatusSchema = z.enum(['notStarted', 'strong', 'needsReview', 'atRisk']);
+export type HealthStatus = z.infer<typeof healthStatusSchema>;
+
 export const DEFAULT_MANUAL_INTERVALS = [1, 3, 7, 14, 30, 60] as const;
 
 export const manualIntervalsSchema = z.array(z.number().int().positive()).min(1);

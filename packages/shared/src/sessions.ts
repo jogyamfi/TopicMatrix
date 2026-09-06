@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { dateOnlySchema } from './date.js';
+import { reviewScheduleViewSchema } from './schedule.js';
 
 // Single source of truth for StudySession request shapes (P5, FR-4.1). `accuracy` is never
 // accepted here \u2014 it's always computed server-side from questionsCorrect/questionsAttempted
@@ -58,3 +59,56 @@ export const sessionPreviewRequestSchema = z
   })
   .refine((v) => v.questionsCorrect <= v.questionsAttempted, questionsCorrectWithinAttempted);
 export type SessionPreviewRequest = z.infer<typeof sessionPreviewRequestSchema>;
+// Response shapes (P7) — mirrors packages/api-core/src/routes/sessions.ts's view functions.
+export const studySessionViewSchema = z.object({
+  id: z.string(),
+  topicId: z.string(),
+  studiedOn: z.string(),
+  sourceLabel: z.string().nullable(),
+  questionsAttempted: z.number(),
+  questionsCorrect: z.number(),
+  accuracy: z.number(),
+  confidence: z.number(),
+  durationMinutes: z.number().nullable(),
+  notes: z.string().nullable(),
+  gradeUsed: z.number().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type StudySessionView = z.infer<typeof studySessionViewSchema>;
+
+export const sessionsListResponseSchema = z.object({ sessions: z.array(studySessionViewSchema) });
+export type SessionsListResponse = z.infer<typeof sessionsListResponseSchema>;
+
+export const sessionResponseSchema = z.object({
+  session: studySessionViewSchema,
+  schedule: reviewScheduleViewSchema.nullable(),
+});
+export type SessionResponse = z.infer<typeof sessionResponseSchema>;
+
+export const sessionDeleteResponseSchema = z.object({
+  status: z.string(),
+  schedule: reviewScheduleViewSchema.nullable(),
+});
+export type SessionDeleteResponse = z.infer<typeof sessionDeleteResponseSchema>;
+
+export const sessionPreviewResponseSchema = z.object({
+  accuracy: z.number(),
+  grade: z.number(),
+});
+export type SessionPreviewResponse = z.infer<typeof sessionPreviewResponseSchema>;
+
+export const snapshotViewSchema = z.object({
+  id: z.string(),
+  topicId: z.string(),
+  capturedOn: z.string(),
+  score: z.number(),
+  accuracyComponent: z.number(),
+  confidenceComponent: z.number(),
+  recencyComponent: z.number(),
+  triggeredBySessionId: z.string().nullable(),
+});
+export type SnapshotView = z.infer<typeof snapshotViewSchema>;
+
+export const historyResponseSchema = z.object({ snapshots: z.array(snapshotViewSchema) });
+export type HistoryResponse = z.infer<typeof historyResponseSchema>;
