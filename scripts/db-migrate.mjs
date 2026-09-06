@@ -15,5 +15,5 @@ if (provider === 'd1') {
   process.exit(0);
 }
 
-const schemaFile = provider === 'postgresql' ? 'schema.postgres.prisma' : 'schema.sqlite.prisma';
-execSync(`npx prisma migrate dev --schema=prisma/${schemaFile}`, { stdio: 'inherit' });
+const schemaDir = provider === 'postgresql' ? 'postgres' : 'sqlite';
+execSync(`npx prisma migrate dev --schema=prisma/${schemaDir}/schema.prisma`, { stdio: 'inherit' });

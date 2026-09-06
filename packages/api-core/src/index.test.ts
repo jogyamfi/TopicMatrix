@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { createNodeDb } from '@topicmatrix/db/node';
 import { createApp } from './index.js';
 import { buildDeps } from './deps.js';
 
 function testDeps() {
-  return buildDeps({
-    DATABASE_PROVIDER: 'sqlite',
-    DATABASE_URL: 'file:./dev.db',
-    JWT_SECRET: 'a'.repeat(32),
-    NODE_ENV: 'test',
-  });
+  return buildDeps(
+    {
+      DATABASE_PROVIDER: 'sqlite',
+      DATABASE_URL: 'file:./dev.db',
+      JWT_SECRET: 'a'.repeat(32),
+      NODE_ENV: 'test',
+    },
+    createNodeDb,
+  );
 }
 
 describe('createApp health routes', () => {

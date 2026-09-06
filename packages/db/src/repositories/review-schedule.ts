@@ -1,0 +1,46 @@
+import { AppError } from '@topicmatrix/shared';
+import type { PrismaClientOrTx, ReviewSchedule } from '../types.js';
+
+export interface UpsertReviewScheduleInput {
+  algorithm: string;
+  lastReviewedOn?: Date | null;
+  nextReviewOn?: Date | null;
+  intervalDays?: number | null;
+  repetitions?: number;
+  lapses?: number;
+  easeFactor?: number | null;
+  stability?: number | null;
+  difficulty?: number | null;
+  manualLadderIndex?: number | null;
+  isSuspended?: boolean;
+}
+
+export interface ReviewScheduleRepository {
+  find(userId: string, topicId: string): Promise<ReviewSchedule | null>;
+  /** One schedule per topic (§6.1) — create-or-replace, as scheduling recalculation always does (FR-4.3). */
+  upsert(userId: string, topicId: string, input: UpsertReviewScheduleInput): Promise<ReviewSchedule>;
+}
+
+export function createReviewScheduleRepository(client: PrismaClientOrTx): ReviewScheduleRepository {
+  async function assertOwned(userId: string, topicId: string): Promise<void> {
+    const topic = await client.topic.findFirst({ where: { id: topicId, subject: { userId } } });
+    if (!topic) {
+      throw new AppError('NOT_FOUND', 'Topic not found');
+    }
+  }
+
+  return {
+    find: async (userId, topicId) => {
+      await assertOwned(userId, topicId);
+      return client.reviewSchedule.findUnique({ where: { topicId } });
+    },
+    upsert: async (userId, topicId, input) => {
+      await assertOwned(userId, topicId);
+      return client.reviewSchedule.upsert({
+        where: { topicId },
+        create: { topicId, ...input },
+        update: input,
+      });
+    },
+  };
+}

@@ -1,15 +1,3 @@
-﻿-- D1 SQL derived from prisma/d1/schema.prisma via `prisma migrate diff --from-empty
--- --to-schema-datamodel` (no live D1/DB connection needed to generate it). Applied with
--- `wrangler d1 migrations apply` at P11 — see documents/planning/adr-001-data-access.md.
--- Regenerate with:
---   npx prisma migrate diff --from-empty --to-schema-datamodel prisma/d1/schema.prisma --script
--- Covers the full P1 schema (SRS §6); the P0 version only had the HealthCheck placeholder.
--- CreateTable
-CREATE TABLE "HealthCheck" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -192,4 +180,3 @@ CREATE UNIQUE INDEX "Tag_userId_nameNormalised_key" ON "Tag"("userId", "nameNorm
 
 -- CreateIndex
 CREATE INDEX "RefreshToken_userId_idx" ON "RefreshToken"("userId");
-

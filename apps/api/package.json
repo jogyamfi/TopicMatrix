@@ -8,10 +8,13 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -b",
     "start": "tsx src/index.ts",
-    "seed:admin": "tsx src/seed-admin.ts"
+    "seed:admin": "tsx src/seed-admin.ts",
+    "seed:demo": "tsx src/seed-demo.ts"
   },
   "dependencies": {
     "@topicmatrix/api-core": "*",
+    "@topicmatrix/db": "*",
+    "@topicmatrix/shared": "*",
     "@hono/node-server": "^1.13.7",
     "dotenv": "^16.4.7",
     "hono": "^4.6.14"

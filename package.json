@@ -18,12 +18,15 @@
     "typecheck": "tsc --build",
     "test": "vitest run",
     "test:cf": "vitest run --config vitest.workers.config.ts",
+    "test:integration": "npm run db:generate-schemas && vitest run --config vitest.integration.config.ts",
+    "test:integration:pg": "npm run db:generate-schemas && cross-env DATABASE_PROVIDER=postgresql vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "db:generate-schemas": "tsx scripts/generate-schemas.ts",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:reset": "node scripts/db-reset.mjs",
     "db:studio": "node scripts/db-studio.mjs",
     "seed:admin": "npm run seed:admin -w apps/api",
+    "seed:demo": "npm run seed:demo -w apps/api",
     "deploy:cf": "npm run deploy -w apps/worker"
   },
   "devDependencies": {

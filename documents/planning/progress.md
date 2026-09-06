@@ -101,3 +101,160 @@ Recorded in full in repo memory (`/memories/repo/environment.md`); summary:
   running on a similarly-proxied machine).
 - `packages/db/src/index.ts` is still a placeholder (`createPlaceholderDb`); P1 replaces it with
   real repositories per SRS §14.4/P1 tasks 6–7.
+
+## P1 — Data Model & Persistence Layer
+
+**Status:** Complete (PostgreSQL path implemented but **not runtime-verified** — no Docker on
+this development machine; see Deferred section).
+
+### What shipped
+
+- **Full SRS §6 schema** in `prisma/model.prisma`: `User`, `UserSettings`, `Subject`, `Topic`,
+  `StudySession`, `ReviewSchedule`, `CompetencySnapshot`, `Tag`, `TopicTag`, `RefreshToken` (the
+  P0 `HealthCheck` placeholder is kept alongside it, still used by `/readyz` and the D1 spike
+  test). No `enum`/`Json`/`Decimal`/`@db.*`/arrays anywhere (§6.3). Case-insensitive uniqueness via
+  `*Normalised` companion columns (`packages/shared/normaliseKey`), enforced at the DB level for
+  `User.email`, `Subject.name` (per user) and `Tag.name` (per user). Every relation uses
+  `onDelete: Restrict` — no DB-level cascades anywhere; multi-step deletes must go through a
+  `UnitOfWork` in dependency order (§14.4's D1 rationale, applied uniformly to all providers for
+  consistency). All §6.2 indexes present.
+  - **Deliberate scope decision**: `Topic` sibling-name uniqueness (FR-3.3) is **not** a DB
+    constraint. Both SQLite and PostgreSQL treat `NULL` as distinct-from-`NULL` in unique indexes,
+    so `@@unique([subjectId, parentId, nameNormalised])` would silently fail to catch duplicate
+    **root-level** (`parentId = null`) topic names. Left as P4 application-level validation;
+    documented in a schema comment.
+- **Restructured `prisma/` layout** (a correction to P0's, made necessary once real migrations
+  existed): each provider's generated schema now lives in its own subdirectory —
+  `prisma/sqlite/schema.prisma`, `prisma/postgres/schema.prisma`, `prisma/d1/schema.prisma` — each
+  with its own committed `migrations/` + `migration_lock.toml`. Reason: Prisma resolves a schema's
+  migrations directory as `<schema file's directory>/migrations`; with all three schemas
+  previously sitting directly in `prisma/`, they would have shared **one** migrations folder, and
+  SQLite/PostgreSQL migration SQL dialects diverge. `scripts/generate-schemas.ts`,
+  `scripts/db-{migrate,reset,studio}.mjs`, `.gitignore` and the README were all updated to match.
+  - SQLite: real migration applied via `prisma migrate dev` (`prisma/sqlite/migrations/
+    20260906145617_p1_full_schema/`, on top of P0's `20260906122251_init`).
+  - PostgreSQL: **no live server available** (no Docker on this machine). Generated an initial
+    migration **offline**, with no DB connection needed:
+    `npx prisma migrate diff --from-empty --to-schema-datamodel prisma/postgres/schema.prisma --script`
+    → `prisma/postgres/migrations/20260906150000_init/migration.sql`. This has **not** been
+    applied against a real PostgreSQL instance — do that (`npm run test:integration:pg`) before
+    trusting it, on a machine with Docker.
+  - D1: `apps/worker/migrations/0001_init.sql` regenerated the same way, covering the full schema
+    (was HealthCheck-only from P0).
+  - Along the way, corrected a P0 handover note: `prisma generate --no-engine` is **not** for
+    driver-adapter (D1) clients — it's an incompatible engine mode. D1's client is generated with
+    plain `prisma generate` (no flags), which also turned out to no longer need the
+    `driverAdapters` preview feature at all on Prisma 6.19 (verified via `npm run test:cf`
+    continuing to pass, 4/4).
+- **Repository layer**, `packages/db/src/repositories/`: one module per aggregate (`user`,
+  `user-settings`, `subject`, `topic`, `study-session`, `review-schedule`,
+  `competency-snapshot`, `tag`, `refresh-token`). Every method takes `userId` first (except
+  `User` itself, which *is* the owning identity) and verifies ownership by joining up to the
+  owning user — direct `userId` filter for `StudySession` (denormalised per §6.1), a join through
+  `subject` for `Topic` and everything hanging off it. Reads return `null` for missing-or-not-
+  owned; writes throw `AppError('NOT_FOUND', …)`. `Topic.create` computes the materialised `path`/
+  `depth` correctly for the initial-insert case (full subtree move/rewrite logic is P4 scope).
+  `StudySession.accuracy` is always computed server-side from `questionsCorrect`/
+  `questionsAttempted`, never accepted as input (anticipates FR-4.2).
+- **`UnitOfWork`** (`packages/db/src/unit-of-work.ts`): `run<T>(work)` interface. SQLite/PostgreSQL
+  implementation wraps Prisma's real interactive `$transaction`. The D1 implementation
+  **intentionally throws** with a detailed explanation rather than faking atomicity it can't
+  deliver — D1 has no interactive transactions, and its only genuinely atomic primitive
+  (`env.DB.batch()`) needs a fixed, upfront list of prepared statements, which is a fundamentally
+  different shape from "run this arbitrary callback atomically". Wiring D1's real implementation
+  is explicitly a P11 task (delivery-plan.md P11 task 3) once a live Workers binding exists to
+  build and test it against.
+- **`packages/shared` additions**: `date.ts` (`toUserDate`, `startOfUserDay`, `addDays` — all
+  DST-safe, `Intl`-based, no fixed-UTC-offset math), `normalize.ts` (`normaliseKey`), `domain.ts`
+  (`Role`/`Algorithm`/`Theme`/`TopicDeleteMode` Zod schemas + inferred TS unions,
+  `manualIntervalsJson` parse/stringify helpers). 28 new unit tests, including an explicit
+  DST-boundary round-trip test (Europe/London, October 2026 fall-back) and its integration-test
+  counterpart (same proof through a real DB round-trip).
+- **Test fixtures** (`packages/db/src/fixtures.ts`): `createUser`, `createUserWithSettings`,
+  `createSubject`, `createTopic`, `createTopicChain`, `createStudySession` — every value defaults
+  to something valid-but-unique so tests never collide, even against a shared DB.
+- **Integration test harness**: `vitest.integration.config.ts` (new), `packages/db/test/setup.ts`
+  (provisions a real, migrated scratch database — a temp SQLite file by default, or a live
+  PostgreSQL via `DATABASE_PROVIDER=postgresql`), `packages/db/test/repositories.integration.
+  test.ts` — **25 tests** against a real database: every repository has an explicit cross-user
+  isolation test (acceptance criterion), plus `UnitOfWork` commit/rollback-on-throw, plus the
+  materialised-path chain, plus the DST round-trip stored via a real `StudySession.studiedOn`.
+  `npm run test:integration` (SQLite, runs today) / `npm run test:integration:pg` (needs
+  `docker-compose.dev.yml` — **not run this phase**, no Docker on this machine).
+- **Demo seed** (FR-D.10): `npm run seed:demo` → `apps/api/src/seed-demo.ts`. One demo user
+  (`demo@example.com`), 3 subjects, a 2–3-level topic tree (14 topics total), back-dated sessions
+  (62 total) with a snapshot per session (62), and a `ReviewSchedule` per topic deliberately spread
+  across overdue / due-today / due-soon / future buckets so the review queue (P8) and retention
+  charts (P9) have real variety to build against without hand-entering data. Verified by running
+  it against the real SQLite dev database and checking row counts.
+
+### A real bug found and fixed while implementing this (worth reading before P2+)
+
+Wiring a real Prisma client into `packages/db`'s main barrel **broke `npm run test:cf`** even
+though the `d1` provider branch never executed anything Node-specific: `index.ts` re-exported
+`createPrismaClient`, a *value* import that unconditionally loads **both** the SQLite and
+PostgreSQL generated Prisma clients. Prisma's regular (non-driver-adapter) generated client
+needs Node built-ins (`node:child_process` etc.) just to be *imported*, not just to run a query.
+Because `packages/api-core` (shared by both entrypoints) imported from that barrel, and
+`apps/worker` imports `api-core`, `wrangler`/esbuild bundled that Node-only code into the Worker
+and it failed at runtime with `No such module "node:child_process"`.
+
+**Fix**: split `packages/db` into a runtime-agnostic main barrel (`Db` interface, repositories,
+`UnitOfWork`, a `createDb()` that only ever returns a `d1` stub) and a new Node-only subpath,
+`@topicmatrix/db/node` (`createNodeDb`, the only place that imports the SQLite/PostgreSQL
+clients). `packages/api-core`'s `buildDeps` was changed to take the db-construction function as a
+**parameter** rather than importing one concretely (`buildDeps(env, createDb)`) — `apps/api`
+passes `createNodeDb`, `apps/worker` passes the main barrel's `createDb`. This is now re-verified
+by `npm run test:cf` passing (it's the regression test that would catch this again).
+
+**Lesson for every phase from here on**: nothing reachable from `packages/api-core`'s import
+graph may statically import a Node-only implementation, even indirectly through a shared barrel
+file, even behind a branch that's never taken for the Workers target. A clean `lint`/`typecheck`
+pass does **not** catch this — only actually running `npm run test:cf` does. Treat that command
+as load-bearing for every future phase that touches `packages/api-core` or `packages/db`.
+
+### Deferred / not in scope for P1
+
+- **PostgreSQL is implemented but unverified at runtime** — no Docker available on this
+  development machine. The schema, the offline-generated initial migration, and the
+  `test:integration:pg` script all exist and *should* work (the SQLite path they're structurally
+  identical to is fully verified), but nobody has run `prisma migrate deploy` or the integration
+  suite against a real PostgreSQL instance yet. **Do this before trusting it** — first task for
+  whoever next has Docker available.
+- **D1 repositories are not wired** — `createDb()` returns a `Db` whose repository methods throw
+  a clear, documented error for `d1` (rather than silently pretending to work). This is
+  deliberate: D1 needs a live Workers `D1Database` binding that this function doesn't have, and
+  wiring it is explicitly a P11 task (delivery-plan.md P11 task 3). `/healthz`/`/readyz` never
+  touch `deps.db`'s repositories, so `wrangler dev` is unaffected.
+- **Topic sibling-name uniqueness (FR-3.3)** is not a DB constraint (NULL-distinctness quirk on
+  both providers — see above); P4 must validate it at the application level when implementing
+  topic create/rename.
+- **`/readyz`'s real DB ping** (a P0-authored aspiration in a code comment, not an explicit P1
+  task) was deliberately *not* implemented: doing it properly would add real filesystem/DB side
+  effects to `packages/api-core/src/index.test.ts`, which is currently a fast, pure unit test.
+  Worth revisiting alongside connection-lifecycle management, not as a drive-by addition.
+- Full topic-tree operations (move/re-parent, cycle prevention, batch path rewrites, cascade vs.
+  promote delete) are P4 scope — P1's `topics.create` only computes a correct initial `path`/
+  `depth`; there is no `move` yet.
+
+### Decisions taken
+
+- All relations use `onDelete: Restrict`, never a DB-level cascade, on every provider (not just
+  D1) — for consistency and because it makes a forgotten explicit-deletion step in a `UnitOfWork`
+  fail loudly instead of silently cascading.
+- `packages/db`'s Node/Workers split (see bug writeup above) — `@topicmatrix/db/node` is now the
+  permanent home for anything that touches the SQLite/PostgreSQL Prisma clients.
+- `UnitOfWork`'s D1 implementation throws rather than faking atomicity — see rationale above.
+
+### Handover to P2
+
+- `packages/db` exports everything P2 needs: `users`/`userSettings`/`refreshTokens`
+  repositories, `createFixtures`, and the `Db`/`UnitOfWork` types. Password hashing, JWT/token
+  services, auth routes and middleware are all still to build.
+- Use `createNodeDb` (via `@topicmatrix/db/node`) from `apps/api`-side code only; use the main
+  `@topicmatrix/db` barrel's `createDb` everywhere else (it's what `buildDeps` is already wired
+  to for the Worker target). Do not add a new direct import of the SQLite/PostgreSQL generated
+  clients anywhere outside `packages/db/src/{client,node}.ts` — see the bug writeup above.
+- `seed-admin.ts` is still the P0 placeholder (refuses to run, `exitCode = 1`) — P2 implements it
+  for real now that `User`/`UserSettings` repositories exist.
+- Verify PostgreSQL for real (see Deferred) before building anything that assumes it works.

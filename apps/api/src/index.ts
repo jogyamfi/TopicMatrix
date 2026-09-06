@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { serve } from '@hono/node-server';
 import { createApp, buildDeps } from '@topicmatrix/api-core';
+import { createNodeDb } from '@topicmatrix/db/node';
 
 // npm workspace scripts run with cwd set to apps/api, not the repo root, so the default
 // cwd-relative dotenv lookup would miss the root .env — resolve it explicitly.
@@ -12,8 +13,8 @@ dotenv.config({ path: path.join(repoRoot, '.env') });
 
 // process.env is read fresh inside the factory on every request (NF-15); this one-off call
 // is only to learn the port/logger to start listening, not a cached deps singleton.
-const startupDeps = buildDeps(process.env);
-const app = createApp(() => buildDeps(process.env));
+const startupDeps = buildDeps(process.env, createNodeDb);
+const app = createApp(() => buildDeps(process.env, createNodeDb));
 
 serve({ fetch: app.fetch, port: startupDeps.config.port }, (info) => {
   startupDeps.logger.info('server_started', {

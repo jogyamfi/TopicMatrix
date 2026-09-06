@@ -1,8 +1,201 @@
-// Shared model fragment (SRS §6.3). No enum, no Json, no Decimal, no @db.* native attributes,
-// no arrays — enum-like fields are String plus a TS union in packages/shared instead.
-// The real schema (User, Subject, Topic, ...) is modelled at P1; this placeholder entity only
-// exists so the multi-provider generation pipeline and migrations can be proven end to end.
+// Shared model fragment (SRS §6.1-6.3). No enum, no Json, no Decimal, no @db.* native
+// attributes, no arrays — enum-like fields are String plus a TS union/Zod schema in
+// packages/shared instead (see packages/shared/src/domain.ts). Case-insensitive uniqueness is
+// enforced via a normalised lower-case companion column (packages/shared normaliseKey), never
+// Prisma's `mode: 'insensitive'`, which is PostgreSQL-only.
+//
+// No relation below cascades at the database level: D1 has no control over foreign-key
+// enforcement mid-transaction and no interactive transactions (§14.4), so every multi-step
+// delete is performed explicitly, in dependency order, inside a UnitOfWork — never left to a
+// deferred/cascading constraint. `onDelete: Restrict` (the explicit default here) makes a
+// forgotten deletion step fail loudly instead of silently cascading.
+
+// Kept from P0: a minimal table for /readyz's DB ping and the D1 batch-atomicity regression
+// test (apps/worker/src/d1-spike.cf.test.ts) — deliberately independent of the real domain model.
 model HealthCheck {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
+}
+
+model User {
+  id                  String   @id @default(cuid())
+  email               String
+  emailNormalised     String   @unique
+  passwordHash        String
+  displayName         String
+  role                String   @default("LEARNER")
+  isActive            Boolean  @default(true)
+  mustChangePassword  Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  settings      UserSettings?
+  subjects      Subject[]
+  tags          Tag[]
+  refreshTokens RefreshToken[]
+}
+
+model UserSettings {
+  userId               String @id
+  timezone             String @default("Europe/London")
+  dayStartHour         Int    @default(4)
+  defaultAlgorithm     String @default("fsrs")
+  manualIntervalsJson  String @default("[1,3,7,14,30,60]")
+  neglectThresholdDays Int    @default(30)
+  weightAccuracy       Float  @default(0.60)
+  weightConfidence     Float  @default(0.25)
+  weightRecency        Float  @default(0.15)
+  strongThreshold      Float  @default(75)
+  needsReviewThreshold Float  @default(50)
+  theme                String @default("system")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+}
+
+model Subject {
+  id                String   @id @default(cuid())
+  userId            String
+  name              String
+  nameNormalised    String
+  description       String?
+  colour            String?
+  icon              String?
+  sortOrder         Int      @default(0)
+  isArchived        Boolean  @default(false)
+  defaultAlgorithm  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  topics Topic[]
+
+  @@unique([userId, nameNormalised])
+  @@index([userId, isArchived])
+}
+
+model Topic {
+  id                 String   @id @default(cuid())
+  subjectId          String
+  parentId           String?
+  name               String
+  nameNormalised     String
+  notes              String?
+  sortOrder          Int      @default(0)
+  depth              Int      @default(0)
+  path               String
+  algorithmOverride  String?
+  isSuspended        Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  parent  Topic?  @relation("TopicChildren", fields: [parentId], references: [id], onDelete: Restrict)
+  // Sibling-name uniqueness (FR-3.3) is validated in the repository layer rather than a DB
+  // constraint: SQLite and PostgreSQL both treat NULL as distinct-from-NULL in unique indexes,
+  // so a plain @@unique([subjectId, parentId, nameNormalised]) would silently fail to prevent
+  // duplicate root-level (parentId = null) topic names on either provider.
+  children            Topic[]              @relation("TopicChildren")
+  studySessions       StudySession[]
+  reviewSchedule      ReviewSchedule?
+  competencySnapshots CompetencySnapshot[]
+  topicTags           TopicTag[]
+
+  @@index([subjectId, parentId])
+  @@index([path])
+}
+
+model StudySession {
+  id                  String   @id @default(cuid())
+  topicId             String
+  userId              String
+  studiedOn           DateTime
+  sourceLabel         String?
+  questionsAttempted  Int
+  questionsCorrect    Int
+  accuracy            Float
+  confidence          Int
+  durationMinutes     Int?
+  notes               String?
+  gradeUsed           Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  topic               Topic                @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  competencySnapshots CompetencySnapshot[]
+
+  @@index([topicId, studiedOn])
+  @@index([userId, studiedOn])
+}
+
+model ReviewSchedule {
+  topicId           String    @id
+  algorithm         String
+  lastReviewedOn    DateTime?
+  nextReviewOn      DateTime?
+  intervalDays      Int?
+  repetitions       Int       @default(0)
+  lapses            Int       @default(0)
+  easeFactor        Float?
+  stability         Float?
+  difficulty        Float?
+  manualLadderIndex Int?
+  isSuspended       Boolean   @default(false)
+  updatedAt         DateTime  @updatedAt
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Restrict)
+
+  @@index([nextReviewOn])
+}
+
+model CompetencySnapshot {
+  id                    String   @id @default(cuid())
+  topicId               String
+  capturedOn            DateTime
+  score                 Float
+  accuracyComponent     Float
+  confidenceComponent   Float
+  recencyComponent      Float
+  triggeredBySessionId  String?
+  createdAt             DateTime @default(now())
+
+  topic             Topic         @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  triggeredBySession StudySession? @relation(fields: [triggeredBySessionId], references: [id], onDelete: SetNull)
+
+  @@index([topicId, capturedOn])
+}
+
+model Tag {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  nameNormalised  String
+  createdAt       DateTime @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  topicTags TopicTag[]
+
+  @@unique([userId, nameNormalised])
+}
+
+model TopicTag {
+  topicId String
+  tagId   String
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Restrict)
+
+  @@id([topicId, tagId])
+}
+
+model RefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
 }

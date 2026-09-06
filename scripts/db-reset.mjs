@@ -9,5 +9,7 @@ if (provider === 'd1') {
 }
 
 execSync('npx tsx scripts/generate-schemas.ts', { stdio: 'inherit' });
-const schemaFile = provider === 'postgresql' ? 'schema.postgres.prisma' : 'schema.sqlite.prisma';
-execSync(`npx prisma migrate reset --force --schema=prisma/${schemaFile}`, { stdio: 'inherit' });
+const schemaDir = provider === 'postgresql' ? 'postgres' : 'sqlite';
+execSync(`npx prisma migrate reset --force --schema=prisma/${schemaDir}/schema.prisma`, {
+  stdio: 'inherit',
+});

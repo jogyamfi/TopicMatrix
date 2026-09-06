@@ -1,12 +1,16 @@
 // Emits prisma/schema.<provider>.prisma by prepending the correct datasource/generator
 // blocks to the shared prisma/model.prisma fragment. Prisma has no environment variable
 // for `datasource.provider`, so this is generated rather than configured (SRS §6.3, P0 task 7).
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 interface ProviderDef {
-  outputFile: string;
+  // Each provider gets its own subdirectory (not just its own filename) so `prisma migrate dev`
+  // resolves a separate `migrations/` history per provider — sqlite and postgresql migration SQL
+  // dialects diverge, so they cannot share one migrations folder (P1 correction to P0's layout,
+  // which only had a single-entity placeholder model and hadn't hit this yet).
+  dir: string;
   datasourceProvider: 'sqlite' | 'postgresql';
   clientOutput: string;
   extraGeneratorLines?: string[];
@@ -19,20 +23,19 @@ const model = readFileSync(modelPath, 'utf8').trim();
 
 const providers: ProviderDef[] = [
   {
-    outputFile: 'schema.sqlite.prisma',
+    dir: 'sqlite',
     datasourceProvider: 'sqlite',
-    clientOutput: '../packages/db/generated/sqlite',
+    clientOutput: '../../packages/db/generated/sqlite',
   },
   {
-    outputFile: 'schema.postgres.prisma',
+    dir: 'postgres',
     datasourceProvider: 'postgresql',
-    clientOutput: '../packages/db/generated/postgres',
+    clientOutput: '../../packages/db/generated/postgres',
   },
   {
-    outputFile: 'schema.d1.prisma',
+    dir: 'd1',
     datasourceProvider: 'sqlite',
-    clientOutput: '../packages/db/generated/d1',
-    extraGeneratorLines: ['  previewFeatures = ["driverAdapters"]'],
+    clientOutput: '../../packages/db/generated/d1',
     note: '// D1 is reached through a Workers binding, not this url — see documents/planning/adr-001-data-access.md.',
   },
 ];
@@ -63,7 +66,9 @@ for (const def of providers) {
     '',
   ].join('\n');
 
-  const outputPath = path.join(root, 'prisma', def.outputFile);
+  const outputDir = path.join(root, 'prisma', def.dir);
+  mkdirSync(outputDir, { recursive: true });
+  const outputPath = path.join(outputDir, 'schema.prisma');
   writeFileSync(outputPath, `${header}\n${model}\n`, 'utf8');
   console.log(`Generated ${path.relative(root, outputPath)}`);
 }
