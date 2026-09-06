@@ -10,6 +10,13 @@ describe('toErrorEnvelope', () => {
     expect(body.error.message).toBe('Subject not found');
   });
 
+  it('maps TOPIC_CYCLE to a 400 (FR-3.4)', () => {
+    const err = new AppError('TOPIC_CYCLE', 'Cannot move a topic into itself or a descendant');
+    const { status, body } = toErrorEnvelope(err, { exposeDetails: true });
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('TOPIC_CYCLE');
+  });
+
   it('suppresses details unless exposeDetails is true', () => {
     const err = new AppError('VALIDATION_FAILED', 'invalid', { field: 'name' });
     expect(toErrorEnvelope(err, { exposeDetails: false }).body.error.details).toBeUndefined();

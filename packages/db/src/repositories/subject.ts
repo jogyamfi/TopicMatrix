@@ -37,19 +37,32 @@ export function createSubjectRepository(client: PrismaClientOrTx): SubjectReposi
         orderBy: { sortOrder: 'asc' },
       }),
     findById: (userId, subjectId) => client.subject.findFirst({ where: { id: subjectId, userId } }),
-    create: (userId, input) =>
-      client.subject.create({
-        data: { userId, nameNormalised: normaliseKey(input.name), ...input },
-      }),
+    create: async (userId, input) => {
+      const nameNormalised = normaliseKey(input.name);
+      // Pre-check rather than catching the DB's unique-constraint error (same convention as
+      // admin-users.ts) — case-insensitive uniqueness per user (FR-2.2).
+      const conflict = await client.subject.findFirst({ where: { userId, nameNormalised } });
+      if (conflict) {
+        throw new AppError('CONFLICT', 'A subject with this name already exists');
+      }
+      return client.subject.create({ data: { userId, nameNormalised, ...input } });
+    },
     update: async (userId, subjectId, patch) => {
       await findOwned(userId, subjectId);
       const { name, ...rest } = patch;
+      if (name === undefined) {
+        return client.subject.update({ where: { id: subjectId }, data: rest });
+      }
+      const nameNormalised = normaliseKey(name);
+      const conflict = await client.subject.findFirst({
+        where: { userId, nameNormalised, NOT: { id: subjectId } },
+      });
+      if (conflict) {
+        throw new AppError('CONFLICT', 'A subject with this name already exists');
+      }
       return client.subject.update({
         where: { id: subjectId },
-        data: {
-          ...rest,
-          ...(name !== undefined ? { name, nameNormalised: normaliseKey(name) } : {}),
-        },
+        data: { ...rest, name, nameNormalised },
       });
     },
     delete: async (userId, subjectId) => {

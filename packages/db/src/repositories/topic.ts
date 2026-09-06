@@ -68,6 +68,16 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
         depth = 0;
       }
 
+      // Sibling-name uniqueness (FR-3.3) is an application-level check, not a DB constraint —
+      // see prisma/model.prisma's comment on why (NULL-distinctness on root-level topics).
+      const nameNormalised = normaliseKey(input.name);
+      const sibling = await client.topic.findFirst({
+        where: { subjectId: input.subjectId, parentId: input.parentId ?? null, nameNormalised },
+      });
+      if (sibling) {
+        throw new AppError('CONFLICT', 'A sibling topic with this name already exists');
+      }
+
       // Generated up front (rather than left to Prisma's @default(cuid())) so it can be folded
       // into `path` before the row is inserted.
       const id = crypto.randomUUID();
@@ -77,7 +87,7 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
           subjectId: input.subjectId,
           parentId: input.parentId ?? null,
           name: input.name,
-          nameNormalised: normaliseKey(input.name),
+          nameNormalised,
           notes: input.notes ?? null,
           sortOrder: input.sortOrder ?? 0,
           algorithmOverride: input.algorithmOverride ?? null,
@@ -87,14 +97,26 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
       });
     },
     update: async (userId, topicId, patch) => {
-      await findOwned(userId, topicId);
+      const existing = await findOwned(userId, topicId);
       const { name, ...rest } = patch;
+      if (name === undefined) {
+        return client.topic.update({ where: { id: topicId }, data: rest });
+      }
+      const nameNormalised = normaliseKey(name);
+      const sibling = await client.topic.findFirst({
+        where: {
+          subjectId: existing.subjectId,
+          parentId: existing.parentId,
+          nameNormalised,
+          NOT: { id: topicId },
+        },
+      });
+      if (sibling) {
+        throw new AppError('CONFLICT', 'A sibling topic with this name already exists');
+      }
       return client.topic.update({
         where: { id: topicId },
-        data: {
-          ...rest,
-          ...(name !== undefined ? { name, nameNormalised: normaliseKey(name) } : {}),
-        },
+        data: { ...rest, name, nameNormalised },
       });
     },
     delete: async (userId, topicId) => {

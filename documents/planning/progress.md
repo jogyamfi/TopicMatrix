@@ -475,3 +475,134 @@ not runtime-tested here" status; Cloudflare Workers path has a real, documented 
 - The two flagged judgment calls above (roll-up zero-weight fallback, progress-status ordering)
   are the two most likely things to need revisiting once real data and a real UI exist.
 
+## P4 — Subjects & Topic Tree API
+
+**Status:** Complete (SQLite path verified; PostgreSQL inherits P1's "generated but not
+runtime-tested here" status; Cloudflare Workers path unaffected — `npm run test:cf` still green).
+
+### What shipped
+
+- **Subject routes** (`packages/api-core/src/routes/subjects.ts`), all under
+  `requireAuth, requirePasswordChanged`: `GET/POST /subjects`, `GET/PATCH/DELETE /subjects/:id`,
+  `GET /subjects/:id/tree`. Name uniqueness (FR-2.2) is enforced with a pre-check in the
+  repository (`packages/db/src/repositories/subject.ts`, same "check first" convention as
+  admin-users.ts rather than catching the DB's unique-constraint error) — case-insensitive per
+  user, on both create and rename. Delete requires an explicit `{ confirm: true }` body field
+  (FR-2.4) and cascades topics/sessions/schedules/snapshots/tag-associations inside one
+  `UnitOfWork` (`packages/db/src/subject-deletion.ts`'s `deleteSubjectCascade`), same pattern as
+  P2's `deleteUserAccount`.
+- **Topic routes** (`packages/api-core/src/routes/topics.ts`): `GET /topics?subjectId=` (query
+  param required, 400 without it), `POST /topics`, `GET/PATCH/DELETE /topics/:id`,
+  `POST /topics/:id/move`. Sibling-name uniqueness (FR-3.3) — flagged at P1 as an
+  application-level concern (NULL-distinctness on both providers, see prisma/model.prisma's
+  comment) — is now enforced in `packages/db/src/repositories/topic.ts`'s `create`/`update`, and
+  again in `topic-tree.ts`'s `moveTopic` (moving into a new parent can create a fresh collision).
+- **Materialised path maintenance** (`packages/db/src/topic-tree.ts`), the trickiest part of this
+  phase as flagged in the plan:
+  - `moveTopic` — re-parents a topic (including across subjects, FR-3.5) and/or reorders it.
+    Rejects a move onto the topic itself or any of its own descendants with a dedicated
+    `TOPIC_CYCLE` error code (FR-3.4, new `ErrorCode` mapped to HTTP 400 — a specific
+    machine-readable code was an explicit acceptance criterion, not just a generic 400), checked
+    via the materialised `path` prefix (`parent.path.startsWith(topic.path)`) before writing
+    anything. Rewrites `path`/`depth` for the moved topic **and every descendant** in one
+    `UnitOfWork`, in a single query (`path: { startsWith: oldPrefix }` conveniently matches the
+    topic's own row too, since its own path equals the prefix — one loop handles both).
+  - `deleteTopic(db, userId, topicId, mode)` — `cascade` deletes the whole subtree (topic +
+    descendants, and every session/schedule/snapshot/tag-association hanging off them);
+    `promote` re-parents each direct child (and its own descendants) up to the deleted topic's
+    former parent, rewriting paths/depths, then deletes only the topic itself, leaving no
+    orphans (FR-3.6). A same-name collision at the promoted level is checked and rejected with
+    `CONFLICT` per child before any rewrite happens.
+  - **A real bug found while testing this (read before touching bulk topic deletes again)**:
+    `Topic.parentId` is a self-referential FK with `onDelete: Restrict` (§6.3/P1). A single
+    `deleteMany` over an entire subtree's ids at once throws "Foreign key constraint violated" on
+    SQLite, even though every id in the batch is being deleted together — the constraint isn't
+    deferred across the one statement, so a child row can still be evaluated against an
+    already-deleted parent mid-delete. **Fix: delete deepest-`depth`-first**, one `deleteMany`
+    per distinct depth level (not one delete per row — still batched, just grouped by depth).
+    This turned out to be a **pre-existing latent bug** in P2's `deleteUserAccount`
+    (`account-deletion.ts`) too — it only surfaced now because P4 is the first phase to create
+    real multi-level topic trees in a test. Fixed there as well; `subject-deletion.ts` (new)
+    uses the same pattern from the start.
+- **`GET /subjects/:id/tree`** (`packages/api-core/src/routes/topic-tree-view.ts` +
+  `subjects.ts`): fetches the subject's full flat topic list and nests it client-side into a
+  tree, attaching a `metrics` object to every node. Hard-capped at `MAX_TREE_NODES = 2000`
+  (§14.4/task 7) — a subject with more topics than that returns a `BAD_REQUEST` with the actual
+  count and the limit in `details`, rather than an unbounded response.
+- **Own vs aggregate metrics — explicit null placeholders (FR-3.8, task 10's documented get-out
+  clause)**: `placeholderTopicMetrics()` returns `{ ownScore: null, aggregateScore: null,
+  ownHealthStatus: null, aggregateHealthStatus: null }` for every topic node. P3's scoring/
+  roll-up functions exist and are correct, but there is no real `StudySession`/
+  `CompetencySnapshot` data pipeline wired yet (that's P5's job — persisting `ReviewSchedule` and
+  computing scores on write/read). Returning `null` is an honest "not yet available", matching
+  `packages/core`'s own convention for a zero-session topic, rather than fabricating a `0`. P5
+  replaces `placeholderTopicMetrics()`'s call sites with real computation once the pipeline
+  exists — the function name and its single call site per view are deliberately easy to grep for.
+- **Tags** (`packages/api-core/src/routes/tags.ts`, FR-3.9): `GET/POST /tags`, `DELETE
+  /tags/:id`, `GET /tags/:id/topics` (the cross-subject filter — every topic, in any subject,
+  carrying a given tag), `GET/POST/DELETE /topics/:id/tags[/:tagId]` for listing/attaching/
+  detaching. The repository layer (`TagRepository`) already existed from P1; this phase added
+  the missing inverse lookup (`topicsForTag`) and the HTTP surface. Tag name uniqueness
+  (case-insensitive per user) gained the same pre-check pattern as subjects/topics.
+- **A `withoutUndefined<T>` typing lesson** (recorded in repo memory): the existing admin-users.ts
+  helper (`{ [K in keyof T]?: Exclude<T[K], undefined> }`) forces every key optional in its
+  return type, which silently breaks *create*-endpoint bodies with required fields (e.g. `name`,
+  `subjectId`) once reused there — `exactOptionalPropertyTypes` then rejects the call with a
+  confusing "optional in source but required in target" error. Fixed locally (subjects.ts,
+  topics.ts) by removing the added `?` — a homomorphic mapped type without an added modifier
+  preserves each key's original required/optional-ness from the source while still stripping
+  `undefined` from the value type.
+- **Tests**: 3 pure unit tests for `buildTopicTree`/`placeholderTopicMetrics` (no DB), 11 new
+  SQLite integration tests in `packages/db/test/topic-tree.integration.test.ts` (move across
+  subjects with full path/depth verification down a 5-level chain, both cycle-rejection cases,
+  cascade-delete, promote-delete leaving no orphans, subject cascade-delete, sibling-uniqueness),
+  plus 21 new HTTP-level integration tests across `subjects.integration.test.ts`,
+  `topics.integration.test.ts` and `tags.integration.test.ts` covering the happy path,
+  validation failure (422), unauthenticated (401), and cross-user 404-not-403 for every new
+  route, per the phase Definition of Done.
+
+### Deferred / not in scope for P4
+
+- **Own/aggregate competency metrics are `null` placeholders everywhere** — this is P4 task 10's
+  explicit, documented get-out clause (P3 is merged, but the real data pipeline is P5 scope).
+  `placeholderTopicMetrics()` is the one function P5 needs to replace with real
+  `packages/core` calls fed by real `StudySession`/`ReviewSchedule`/`CompetencySnapshot` rows.
+- **The 2000-node tree cap is implemented but not exercised by a real 2001-topic integration
+  test** — creating that many rows through Prisma in a test would be slow for little marginal
+  value; the length check itself is a two-line, already-typechecked comparison. Worth a
+  synthetic test if this code path ever needs to change.
+- **Bulk topic creation by paste (FR-3.11)** and **manual subject reordering (FR-2.6)** are both
+  marked deferrable-first (**C**) in the plan's own deferred-scope list and were not built.
+- PostgreSQL remains generated-but-unverified at runtime (inherited from P1 — still no Docker on
+  this development machine).
+
+### Decisions taken
+
+- `TOPIC_CYCLE` is a first-class `ErrorCode` (mapped to HTTP 400), not a generic `BAD_REQUEST` —
+  the plan's acceptance criteria specifically calls for a machine-readable code so a UI can
+  distinguish "you tried to create a loop" from any other bad request.
+- Materialised-path rewrites (move, cascade-delete, promote-delete) are hand-written functions
+  in `packages/db` (`topic-tree.ts`, `subject-deletion.ts`) taking a `Db` and driving
+  `db.unitOfWork.run(tx => ...)` directly with raw Prisma calls, rather than repository methods —
+  same convention P2 established for `deleteUserAccount`: these are rare, whole-subtree,
+  cross-aggregate operations, not per-aggregate CRUD.
+- Bulk topic deletes always go deepest-depth-first, never a single flat `deleteMany` over an
+  arbitrary id list — see the FK bug writeup above. Applied uniformly to `topic-tree.ts`,
+  `subject-deletion.ts`, and retrofitted onto P2's `account-deletion.ts`.
+
+### Handover to P5
+
+- P5 is the first real consumer of `placeholderTopicMetrics()`'s replacement: persisting
+  `ReviewSchedule`/`CompetencySnapshot` on session write, then feeding real rows through
+  `packages/core`'s `computeCompetencyScore`/`computeRollupScore`/`computeHealthStatus` to
+  populate `ownScore`/`aggregateScore`/`ownHealthStatus`/`aggregateHealthStatus` in
+  `packages/api-core/src/routes/topic-tree-view.ts` and anywhere else that calls it.
+- `moveTopic`/`deleteTopic`'s deepest-depth-first delete pattern is the template to reuse for any
+  future bulk operation over a topic subtree — do not reintroduce a single flat `deleteMany`
+  across a whole subtree's ids.
+- Topic/Subject/Tag repositories and routes are the shape P5's session/schedule/snapshot
+  endpoints should follow: pre-check uniqueness in the repository, `withoutUndefined` (the fixed,
+  homomorphic version) at the route layer for PATCH-style partial bodies, cross-user 404 tests
+  for every new route.
+
+

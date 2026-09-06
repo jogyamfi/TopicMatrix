@@ -1,5 +1,5 @@
 import { AppError, normaliseKey } from '@topicmatrix/shared';
-import type { PrismaClientOrTx, Tag } from '../types.js';
+import type { PrismaClientOrTx, Tag, Topic } from '../types.js';
 
 export interface TagRepository {
   list(userId: string): Promise<Tag[]>;
@@ -7,6 +7,8 @@ export interface TagRepository {
   create(userId: string, name: string): Promise<Tag>;
   delete(userId: string, tagId: string): Promise<void>;
   listForTopic(userId: string, topicId: string): Promise<Tag[]>;
+  /** Cross-subject filtering (FR-3.9) — every topic (in any subject) tagged with this tag. */
+  topicsForTag(userId: string, tagId: string): Promise<Topic[]>;
   attachToTopic(userId: string, topicId: string, tagId: string): Promise<void>;
   detachFromTopic(userId: string, topicId: string, tagId: string): Promise<void>;
 }
@@ -29,8 +31,14 @@ export function createTagRepository(client: PrismaClientOrTx): TagRepository {
   return {
     list: (userId) => client.tag.findMany({ where: { userId }, orderBy: { name: 'asc' } }),
     findById: (userId, tagId) => client.tag.findFirst({ where: { id: tagId, userId } }),
-    create: (userId, name) =>
-      client.tag.create({ data: { userId, name, nameNormalised: normaliseKey(name) } }),
+    create: async (userId, name) => {
+      const nameNormalised = normaliseKey(name);
+      const conflict = await client.tag.findFirst({ where: { userId, nameNormalised } });
+      if (conflict) {
+        throw new AppError('CONFLICT', 'A tag with this name already exists');
+      }
+      return client.tag.create({ data: { userId, name, nameNormalised } });
+    },
     delete: async (userId, tagId) => {
       await assertTagOwned(userId, tagId);
       await client.tag.delete({ where: { id: tagId } });
@@ -39,6 +47,11 @@ export function createTagRepository(client: PrismaClientOrTx): TagRepository {
       await assertTopicOwned(userId, topicId);
       const topicTags = await client.topicTag.findMany({ where: { topicId }, include: { tag: true } });
       return topicTags.map((tt) => tt.tag);
+    },
+    topicsForTag: async (userId, tagId) => {
+      await assertTagOwned(userId, tagId);
+      const topicTags = await client.topicTag.findMany({ where: { tagId }, include: { topic: true } });
+      return topicTags.map((tt) => tt.topic);
     },
     attachToTopic: async (userId, topicId, tagId) => {
       await Promise.all([assertTopicOwned(userId, topicId), assertTagOwned(userId, tagId)]);

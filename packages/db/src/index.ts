@@ -5,6 +5,9 @@ export { createSqlUnitOfWork, createD1UnitOfWork } from './unit-of-work.js';
 export { createFixtures } from './fixtures.js';
 export type { Fixtures } from './fixtures.js';
 export { deleteUserAccount } from './account-deletion.js';
+export { deleteSubjectCascade } from './subject-deletion.js';
+export { moveTopic, deleteTopic } from './topic-tree.js';
+export type { MoveTopicInput } from './topic-tree.js';
 
 export type {
   PrismaClient,

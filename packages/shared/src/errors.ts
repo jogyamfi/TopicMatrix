@@ -7,6 +7,7 @@ export type ErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'CONFLICT'
+  | 'TOPIC_CYCLE'
   | 'RATE_LIMITED'
   | 'INTERNAL_ERROR';
 
@@ -17,6 +18,9 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   CONFLICT: 409,
+  // Moving a topic onto itself or one of its descendants (FR-3.4) — a specific, machine-readable
+  // code rather than a generic BAD_REQUEST, per delivery-plan.md P4 acceptance criteria.
+  TOPIC_CYCLE: 400,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
 };

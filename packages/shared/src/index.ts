@@ -36,3 +36,27 @@ export type {
   AdminUpdateUserRequest,
   AdminDeleteUserRequest,
 } from './auth.js';
+export {
+  createSubjectRequestSchema,
+  updateSubjectRequestSchema,
+  deleteSubjectRequestSchema,
+} from './subjects.js';
+export type {
+  CreateSubjectRequest,
+  UpdateSubjectRequest,
+  DeleteSubjectRequest,
+} from './subjects.js';
+export {
+  createTopicRequestSchema,
+  updateTopicRequestSchema,
+  moveTopicRequestSchema,
+  deleteTopicRequestSchema,
+} from './topics.js';
+export type {
+  CreateTopicRequest,
+  UpdateTopicRequest,
+  MoveTopicRequest,
+  DeleteTopicRequest,
+} from './topics.js';
+export { createTagRequestSchema } from './tags.js';
+export type { CreateTagRequest } from './tags.js';
