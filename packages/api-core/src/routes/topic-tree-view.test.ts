@@ -31,7 +31,7 @@ describe('buildTopicTree', () => {
       path: '/root/child/grandchild/',
     });
 
-    const tree = buildTopicTree([root, child, grandchild]);
+    const tree = buildTopicTree([root, child, grandchild], new Map());
 
     expect(tree).toHaveLength(1);
     expect(tree[0]?.id).toBe('root');
@@ -45,13 +45,24 @@ describe('buildTopicTree', () => {
     const a = fakeTopic({ id: 'a' });
     const b = fakeTopic({ id: 'b' });
 
-    expect(buildTopicTree([a, b]).map((n) => n.id)).toEqual(['a', 'b']);
+    expect(buildTopicTree([a, b], new Map()).map((n) => n.id)).toEqual(['a', 'b']);
   });
 
-  it('attaches a null-placeholder metrics object to every node (FR-3.8, wired for real at P5)', () => {
-    const [node] = buildTopicTree([fakeTopic({ id: 'root' })]);
+  it('falls back to null-placeholder metrics for a topic missing from the metrics map', () => {
+    const [node] = buildTopicTree([fakeTopic({ id: 'root' })], new Map());
     expect(node?.metrics).toEqual(placeholderTopicMetrics());
     expect(node?.metrics.ownScore).toBeNull();
     expect(node?.metrics.aggregateScore).toBeNull();
+  });
+
+  it('attaches the metrics supplied by the caller for a topic present in the map (P5)', () => {
+    const metrics = {
+      ownScore: 72,
+      aggregateScore: 68,
+      ownHealthStatus: 'strong',
+      aggregateHealthStatus: 'needsReview',
+    };
+    const [node] = buildTopicTree([fakeTopic({ id: 'root' })], new Map([['root', metrics]]));
+    expect(node?.metrics).toEqual(metrics);
   });
 });

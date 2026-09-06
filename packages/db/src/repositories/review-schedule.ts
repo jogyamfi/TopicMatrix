@@ -17,6 +17,8 @@ export interface UpsertReviewScheduleInput {
 
 export interface ReviewScheduleRepository {
   find(userId: string, topicId: string): Promise<ReviewSchedule | null>;
+  /** Every schedule for every topic in a subject, in one query (P5) — avoids an N+1 when scoring a whole tree. */
+  listBySubject(userId: string, subjectId: string): Promise<ReviewSchedule[]>;
   /** One schedule per topic (§6.1) — create-or-replace, as scheduling recalculation always does (FR-4.3). */
   upsert(userId: string, topicId: string, input: UpsertReviewScheduleInput): Promise<ReviewSchedule>;
 }
@@ -34,6 +36,8 @@ export function createReviewScheduleRepository(client: PrismaClientOrTx): Review
       await assertOwned(userId, topicId);
       return client.reviewSchedule.findUnique({ where: { topicId } });
     },
+    listBySubject: (userId, subjectId) =>
+      client.reviewSchedule.findMany({ where: { topic: { subjectId, subject: { userId } } } }),
     upsert: async (userId, topicId, input) => {
       await assertOwned(userId, topicId);
       return client.reviewSchedule.upsert({

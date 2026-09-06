@@ -8,6 +8,7 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerAdminRoutes } from './routes/admin-users.js';
 import { registerSubjectRoutes } from './routes/subjects.js';
 import { registerTopicRoutes } from './routes/topics.js';
+import { registerSessionRoutes } from './routes/sessions.js';
 import { registerTagRoutes } from './routes/tags.js';
 
 /**
@@ -33,6 +34,7 @@ export function createApp(buildRequestDeps: () => AppDeps): Hono<AppEnv> {
   registerAdminRoutes(app);
   registerSubjectRoutes(app);
   registerTopicRoutes(app);
+  registerSessionRoutes(app);
   registerTagRoutes(app);
 
   return app;

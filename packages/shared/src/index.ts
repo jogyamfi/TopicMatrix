@@ -2,7 +2,14 @@ export { AppError, toErrorEnvelope } from './errors.js';
 export type { ErrorCode, ErrorEnvelope } from './errors.js';
 export { parseConfig, ConfigError } from './config.js';
 export type { AppConfig, RawEnv } from './config.js';
-export { toUserDate, startOfUserDay, addDays, isValidTimezone, timezoneSchema } from './date.js';
+export {
+  toUserDate,
+  startOfUserDay,
+  addDays,
+  isValidTimezone,
+  timezoneSchema,
+  dateOnlySchema,
+} from './date.js';
 export { normaliseKey } from './normalize.js';
 export {
   roleSchema,
@@ -60,3 +67,15 @@ export type {
 } from './topics.js';
 export { createTagRequestSchema } from './tags.js';
 export type { CreateTagRequest } from './tags.js';
+export {
+  createStudySessionRequestSchema,
+  updateStudySessionRequestSchema,
+  sessionPreviewRequestSchema,
+} from './sessions.js';
+export type {
+  CreateStudySessionRequest,
+  UpdateStudySessionRequest,
+  SessionPreviewRequest,
+} from './sessions.js';
+export { scheduleOverrideRequestSchema } from './schedule.js';
+export type { ScheduleOverrideRequest } from './schedule.js';

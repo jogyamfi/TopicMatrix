@@ -5,7 +5,7 @@ import {
   updateSubjectRequestSchema,
   deleteSubjectRequestSchema,
 } from '@topicmatrix/shared';
-import { deleteSubjectCascade, type Subject } from '@topicmatrix/db';
+import { deleteSubjectCascade, computeSubjectTopicMetrics, type Subject } from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { parseJsonBody } from '../validation.js';
 import { getAuthUser, requireAuth, requirePasswordChanged } from '../middleware/auth.js';
@@ -105,6 +105,8 @@ export function registerSubjectRoutes(app: Hono<AppEnv>): void {
       );
     }
 
-    return c.json({ subject: toSubjectView(subject), tree: buildTopicTree(topics) });
+    // Score-on-read (§7.6): computed live as of now, never read back from a stored snapshot.
+    const metrics = await computeSubjectTopicMetrics(deps.db, user.id, subjectId, topics, deps.clock());
+    return c.json({ subject: toSubjectView(subject), tree: buildTopicTree(topics, metrics) });
   });
 }

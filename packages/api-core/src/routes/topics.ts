@@ -6,13 +6,20 @@ import {
   moveTopicRequestSchema,
   deleteTopicRequestSchema,
 } from '@topicmatrix/shared';
-import { deleteTopic, moveTopic, type Topic } from '@topicmatrix/db';
+import {
+  deleteTopic,
+  moveTopic,
+  recalculateTopicSchedule,
+  computeSubjectTopicMetrics,
+  computeTopicMetrics,
+  type Topic,
+  type TopicScoreMetrics,
+} from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { parseJsonBody } from '../validation.js';
 import { getAuthUser, requireAuth, requirePasswordChanged } from '../middleware/auth.js';
-import { placeholderTopicMetrics } from './topic-tree-view.js';
 
-function toTopicView(topic: Topic) {
+function toTopicView(topic: Topic, metrics: TopicScoreMetrics) {
   return {
     id: topic.id,
     subjectId: topic.subjectId,
@@ -25,7 +32,7 @@ function toTopicView(topic: Topic) {
     isSuspended: topic.isSuspended,
     createdAt: topic.createdAt,
     updatedAt: topic.updatedAt,
-    metrics: placeholderTopicMetrics(),
+    metrics,
   };
 }
 
@@ -57,7 +64,16 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
       throw new AppError('BAD_REQUEST', 'subjectId query parameter is required');
     }
     const topics = await deps.db.topics.listBySubject(user.id, subjectId);
-    return c.json({ topics: topics.map(toTopicView) });
+    const metrics = await computeSubjectTopicMetrics(deps.db, user.id, subjectId, topics, deps.clock());
+    return c.json({
+      topics: topics.map((topic) => {
+        const topicMetrics = metrics.get(topic.id);
+        if (!topicMetrics) {
+          throw new AppError('INTERNAL_ERROR', `Missing computed metrics for topic ${topic.id}`);
+        }
+        return toTopicView(topic, topicMetrics);
+      }),
+    });
   });
 
   app.post('/topics', async (c) => {
@@ -65,7 +81,8 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
     const user = getAuthUser(c);
     const body = await parseJsonBody(c, createTopicRequestSchema);
     const topic = await deps.db.topics.create(user.id, withoutUndefined(body));
-    return c.json({ topic: toTopicView(topic) }, 201);
+    const metrics = await computeTopicMetrics(deps.db, user.id, topic.id, deps.clock());
+    return c.json({ topic: toTopicView(topic, metrics) }, 201);
   });
 
   app.get('/topics/:id', async (c) => {
@@ -75,7 +92,8 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
     if (!topic) {
       throw new AppError('NOT_FOUND', 'Topic not found');
     }
-    return c.json({ topic: toTopicView(topic) });
+    const metrics = await computeTopicMetrics(deps.db, user.id, topic.id, deps.clock());
+    return c.json({ topic: toTopicView(topic, metrics) });
   });
 
   app.patch('/topics/:id', async (c) => {
@@ -83,7 +101,19 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
     const user = getAuthUser(c);
     const body = await parseJsonBody(c, updateTopicRequestSchema);
     const topic = await deps.db.topics.update(user.id, c.req.param('id'), withoutUndefined(body));
-    return c.json({ topic: toTopicView(topic) });
+
+    // Changing the algorithm re-derives the schedule from history (FR-5.7) — the response tells
+    // the UI whether nextReviewOn actually moved, so it can warn the user.
+    let scheduleChanged = false;
+    if (body.algorithmOverride !== undefined) {
+      const recalculation = await recalculateTopicSchedule(deps.db, user.id, topic.id, {
+        asOfDate: deps.clock(),
+      });
+      scheduleChanged = recalculation.datesChanged;
+    }
+
+    const metrics = await computeTopicMetrics(deps.db, user.id, topic.id, deps.clock());
+    return c.json({ topic: toTopicView(topic, metrics), scheduleChanged });
   });
 
   // cascade vs promote (FR-3.6).
@@ -101,6 +131,7 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
     const user = getAuthUser(c);
     const body = await parseJsonBody(c, moveTopicRequestSchema);
     const topic = await moveTopic(deps.db, user.id, c.req.param('id'), withoutUndefined(body));
-    return c.json({ topic: toTopicView(topic) });
+    const metrics = await computeTopicMetrics(deps.db, user.id, topic.id, deps.clock());
+    return c.json({ topic: toTopicView(topic, metrics) });
   });
 }

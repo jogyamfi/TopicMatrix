@@ -1,10 +1,10 @@
 import type { Topic } from '@topicmatrix/db';
 
 /**
- * Own vs aggregate competency metrics (FR-3.8) are null placeholders until P5 wires real
- * StudySession/CompetencySnapshot data through packages/core's scoring functions — the explicit
- * get-out clause in delivery-plan.md P4 task 10. Returning null is an honest "not yet available"
- * rather than a fabricated zero (packages/core's own convention for zero-session topics).
+ * Own vs aggregate competency metrics (FR-3.8) — wired for real at P5 via
+ * `@topicmatrix/db`'s `computeSubjectTopicMetrics`/`computeTopicMetrics`. `placeholderTopicMetrics`
+ * is kept as `buildTopicTree`'s fallback for any topic missing from the caller-supplied metrics
+ * map (defensive only — every topic passed in should have an entry).
  */
 export interface TopicMetricsView {
   ownScore: number | null;
@@ -40,7 +40,10 @@ export interface TopicTreeNode {
 export const MAX_TREE_NODES = 2000;
 
 /** Builds a nested tree from a flat topic list already ordered by sortOrder. */
-export function buildTopicTree(topics: Topic[]): TopicTreeNode[] {
+export function buildTopicTree(
+  topics: Topic[],
+  metricsByTopicId: ReadonlyMap<string, TopicMetricsView>,
+): TopicTreeNode[] {
   const byParent = new Map<string | null, Topic[]>();
   for (const topic of topics) {
     const key = topic.parentId ?? null;
@@ -60,10 +63,11 @@ export function buildTopicTree(topics: Topic[]): TopicTreeNode[] {
       depth: topic.depth,
       algorithmOverride: topic.algorithmOverride,
       isSuspended: topic.isSuspended,
-      metrics: placeholderTopicMetrics(),
+      metrics: metricsByTopicId.get(topic.id) ?? placeholderTopicMetrics(),
       children: (byParent.get(topic.id) ?? []).map(toNode),
     };
   }
 
   return (byParent.get(null) ?? []).map(toNode);
 }
+

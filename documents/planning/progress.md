@@ -605,4 +605,161 @@ runtime-tested here" status; Cloudflare Workers path unaffected — `npm run tes
   homomorphic version) at the route layer for PATCH-style partial bodies, cross-user 404 tests
   for every new route.
 
+## P5 — Study Sessions, Scoring & Scheduling Integration
+
+**Status:** Complete (SQLite path verified; PostgreSQL/D1 inherit their existing "not yet
+runtime-tested here"/P11 status; `npm run test:cf` still green).
+
+### What shipped
+
+- **`packages/db/src/scheduling.ts`** — the phase's central piece. `resolveAlgorithm(topicOverride,
+  subjectDefault, userDefault)` is the one function every caller uses for FR-5.3's topic → subject
+  → user resolution order. `recalculateTopicSchedule(db, userId, topicId, { asOfDate,
+  triggeredBySessionId? })` is called inside the same `UnitOfWork` as every `StudySession`
+  create/update/delete (and every topic algorithm change): it loads the topic's **full** session
+  history, replays it chronologically through `packages/core`'s `replaySchedule` using the
+  resolved algorithm, upserts (or deletes, if no sessions remain) the topic's `ReviewSchedule`,
+  and records a new `CompetencySnapshot` — never a fabricated one when there are zero sessions
+  (`computeCompetencyScore`'s own `null` convention, §7.2). `isSuspended` is deliberately left
+  untouched by this recalculation — it's a user preference (FR-5.10), not scheduler-derived
+  state. `applyScheduleOverride(db, userId, topicId, override, asOfDate)` handles the three
+  session-history-independent overrides (FR-5.6/5.10: explicit next-review date, snooze by *n*
+  days, suspend/unsuspend) directly, creating a `ReviewSchedule` row with the resolved algorithm
+  if the topic has never been studied.
+- **`packages/db/src/topic-metrics.ts`** — the P4 handover's real replacement for
+  `placeholderTopicMetrics()`. `computeSubjectTopicMetrics(db, userId, subjectId, topics,
+  asOfDate)` computes own + aggregate score/health for every topic in one subject in **two** bulk
+  queries (new `StudySessionRepository.listBySubject`/`ReviewScheduleRepository.listBySubject`
+  methods) rather than a pair of queries per topic — deliberately, since the tree endpoint is
+  capped at 2,000 nodes (P4) but shouldn't need 4,000 round trips to score. Own score/health come
+  straight from `packages/core`'s `computeCompetencyScore`/`computeHealthStatus`; aggregate score
+  is `computeRollupScore` over a topic's materialised-path descendants (§7.3, the same
+  `path.startsWith(prefix)` technique `topic-tree.ts` uses for move/delete); aggregate health is
+  the most severe status among that same descendant set (a small local severity ranking — not a
+  `packages/core` export, since it's specific to "which of several already-computed statuses wins"
+  rather than a scoring rule). `computeTopicMetrics(db, userId, topicId, asOfDate)` is the
+  single-topic convenience wrapper P4's single-topic routes needed. **Scores are always computed
+  live, as of `asOfDate`** (§7.6 "score-on-read") — never read back from the last
+  `CompetencySnapshot`, since the recency component keeps decaying even between sessions;
+  snapshots exist purely for the P9 retention-curve/history use case.
+- **Real metrics wired everywhere `placeholderTopicMetrics()` used to be called**:
+  `packages/api-core/src/routes/topic-tree-view.ts`'s `buildTopicTree` now takes a caller-supplied
+  `metricsByTopicId` map (falling back to the placeholder only for a topic missing from the map —
+  defensive, shouldn't happen in practice) instead of hard-coding the placeholder internally;
+  `subjects.ts`'s `/subjects/:id/tree` and every one of `topics.ts`'s single/list topic routes now
+  call `computeSubjectTopicMetrics`/`computeTopicMetrics` before building their response.
+- **Study session routes** (`packages/api-core/src/routes/sessions.ts`, FR-4.*): `GET/POST
+  /topics/:id/sessions`, `PATCH/DELETE /sessions/:id`, `POST /topics/:id/sessions/preview`
+  (FR-5.4 — returns the grade `computeGrade` would produce, without persisting anything),
+  `GET /topics/:id/history` (date-range-filterable `CompetencySnapshot` listing, `from`/`to` query
+  params), `POST /topics/:id/schedule/override` (FR-5.6/5.10, a Zod discriminated union over
+  `setNextReviewOn`/`snooze`/`suspend`). Every session create/update/delete calls
+  `recalculateTopicSchedule` inside the same request; `studiedOn` defaults to the user's current
+  day (`startOfUserDay(now, tz, dayStartHour)`) when omitted from the request body, and is
+  rejected with `VALIDATION_FAILED` if it resolves later than that "today" (FR-4.1/FR-5.9 — a
+  session logged at 01:00 local with `dayStartHour = 4` still belongs to yesterday).
+- **A real, pre-existing gap fixed along the way**: `StudySessionRepository`'s `computeAccuracy`
+  (P1-authored) only ever validated `questionsAttempted > 0` — it never checked
+  `questionsCorrect <= questionsAttempted`, so a corrupt session (e.g. a partial `PATCH` where
+  only `questionsCorrect` changes) could have silently produced an accuracy above 100%. Fixed as
+  defence-in-depth at the repository layer (`packages/db/src/repositories/study-session.ts`),
+  independent of the new Zod cross-field `.refine()` in `packages/shared/src/sessions.ts` (which
+  only catches the case where both fields are supplied together in one request).
+- **Request schemas** (`packages/shared/src/sessions.ts`, `schedule.ts`) and a new
+  `dateOnlySchema` (`packages/shared/src/date.ts`) — `YYYY-MM-DD` on the wire, parsed straight to
+  the UTC-midnight storage representation via `.transform()`. This was the first schema in the
+  codebase with differing Zod input/output types, which exposed a real bug in
+  `packages/api-core/src/validation.ts`'s `parseJsonBody<T>(c, schema: ZodType<T>)`: constraining
+  to `ZodType<T>` alone forces `Input === Output === T`, so any `.transform()`-based schema failed
+  to typecheck. Fixed by making it generic over the schema itself
+  (`parseJsonBody<S extends ZodType>(c, schema: S): Promise<z.infer<S>>`) — worth remembering for
+  any future request schema that transforms its input.
+- **`packages/db` and `packages/api-core` now depend on `packages/core`** (previously only
+  `packages/db` held Prisma/data-shape concerns and `packages/api-core` composed `db` + `shared`)
+  — necessary for `recalculateTopicSchedule`/`computeSubjectTopicMetrics` (in `db`) and the grade
+  preview endpoint (in `api-core`) to call `packages/core`'s pure functions. No cycle: `core` still
+  depends on nothing but `shared`. Confirmed this doesn't affect Worker bundle size in any
+  meaningful way (`npm run test:cf` and a dry-run `wrangler deploy` both still green; Worker
+  bundle is ~85.85 KiB gzip, well under the 3 MB budget) since `packages/core` has zero runtime
+  dependencies beyond `ts-fsrs`, which was already in the Worker's graph via nothing — this is its
+  first inclusion, and it's small.
+- **Tests**: 13 new integration tests in `packages/api-core/src/routes/sessions.integration.test.ts`
+  covering the full CRUD cycle (including that deleting a topic's last session removes its
+  `ReviewSchedule` rather than leaving stale state), validation failures (422 for
+  `questionsCorrect > questionsAttempted`, for a future `studiedOn`), the preview endpoint,
+  cross-user 404 (not 403) across every new route, all three schedule-override actions (including
+  suspending a never-studied topic with no existing `ReviewSchedule` row), date-range-filtered
+  history, and — matching the phase's own acceptance criteria verbatim — a back-dated
+  out-of-order session producing the same schedule as logging in chronological order, a 5-session
+  create-then-delete-the-2nd sequence whose resulting schedule and latest snapshot are verified
+  against an independently-computed fresh replay/score, two topics with identical sessions but
+  different algorithms producing different (and independently-verified-correct) next-review
+  dates, and a topic algorithm change reporting `scheduleChanged: true` via `PATCH /topics/:id`.
+
+### Deferred / not in scope for P5
+
+- **FSRS interval ceiling (open question Q3)** — still `ts-fsrs`'s own default, as flagged at P3;
+  this phase didn't have a reason to revisit it (no product-specific requirement forced the
+  question). Still open for whoever needs it.
+- **Progress status (`computeProgressStatus`) is not wired into `TopicMetricsView`** —
+  `TopicMetricsView`'s shape (fixed at P4) only has `ownScore`/`aggregateScore`/
+  `ownHealthStatus`/`aggregateHealthStatus`, no progress-status field, so this phase computed and
+  wired exactly those four rather than expanding the view's shape speculatively. Worth adding
+  once a P7/P8/P9 screen actually needs to display it.
+- **No dedicated "read the current schedule" GET endpoint** — the schedule is always returned as
+  part of a session write's or an override's response body (`{ schedule }`); there's no standalone
+  `GET /topics/:id/schedule`. Nothing in the plan's P5 task list calls for one; add it if a P6+ UI
+  screen needs to fetch a topic's schedule independent of a write.
+- **Daily review maximum (FR-5.11)** — explicitly marked deferrable-first (**C**) in the plan's
+  own deferred-scope list; not built.
+- **Weight validation (FR-8.2's "weights sum to 1.0")** is still only enforced by
+  `packages/core`'s `validateScoringWeights`, which nothing calls yet — `UserSettings` weights are
+  trusted as stored. P10 owns the settings UI/validation task; `recalculateTopicSchedule`/
+  `computeSubjectTopicMetrics` both read `settings.weight*` directly without calling it.
+- PostgreSQL/D1 remain in their inherited states (generated-but-unverified at runtime for
+  PostgreSQL; repositories throw a clear "not implemented until P11" for D1) — this phase didn't
+  change either.
+
+### Decisions taken
+
+- **Recalculation always replays the full history from scratch** rather than patching
+  incrementally — the same principle P3 established for `replaySchedule` itself, now applied at
+  the persistence layer: it's what makes a back-dated or edited/deleted session produce a
+  provably-correct result without a separate "incremental update" code path to keep in sync.
+- **A session write always records a new snapshot** (when there are sessions to score at all) —
+  `CompetencySnapshot` is treated as an append-only event log of "the score as of every write",
+  not a single current-value cache. Current-value reads (topic views, tree views) never consult
+  it; they always call `computeCompetencyScore` live (§7.6).
+- **Cross-aggregate scheduling/scoring logic lives in `packages/db`**, not `packages/api-core` —
+  consistent with P4's `topic-tree.ts`/`subject-deletion.ts` convention: these are rare,
+  whole-topic, cross-aggregate reads/writes built directly on `UnitOfWork`/raw Prisma calls, not
+  per-aggregate repository CRUD. `packages/api-core`'s route handlers stay thin: parse the
+  request, call one `db`/`core` function, shape the response.
+- **`isSuspended` is orthogonal to both recalculation and the scheduler's own state** — it's the
+  one `ReviewSchedule` column neither `ScheduleState` (packages/core) nor
+  `recalculateTopicSchedule`'s upsert touches; only `applyScheduleOverride` sets it.
+
+### Handover to P6+
+
+- `packages/api-core`'s public route surface P6 (web shell) and P7 (subjects/topics UI) will
+  consume: `GET/POST /topics/:id/sessions`, `PATCH/DELETE /sessions/:id`,
+  `POST /topics/:id/sessions/preview`, `GET /topics/:id/history`,
+  `POST /topics/:id/schedule/override`. Every topic/subject response now carries **real**
+  `ownScore`/`aggregateScore`/`ownHealthStatus`/`aggregateHealthStatus` — P7's topic
+  cards/detail pages and P9's analytics screens are the first real consumers of live (not
+  placeholder) data.
+- P8 (review queue) will want a bulk "topics due today/overdue" query — nothing in P5 built one,
+  since nothing in P5's task list called for it; `computeSubjectTopicMetrics`'s per-topic
+  `overdueDays` calculation is the piece to reuse/extract when P8 needs to rank a queue.
+- P9 (analytics) is the intended consumer of `GET /topics/:id/history`'s snapshot series for the
+  retention curve (FR-7.7) and of the Topic Health View's "review trend" (FR-7.6, comparing the
+  last two snapshots) — both read directly from `CompetencySnapshot`, never recomputed live,
+  unlike current-score display.
+- If a future phase needs `packages/core` functionality from `packages/api-core` again (it now
+  will, for the first time, going forward), remember P1's Node/Workers-bundling lesson still
+  applies transitively: `packages/core` itself is safe (zero Node deps), but anything *new* added
+  to `packages/core` must stay that way, since both `apps/api` and `apps/worker` now pull it in
+  through `db`/`api-core`.
+
+
 

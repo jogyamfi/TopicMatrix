@@ -8,6 +8,10 @@ export { deleteUserAccount } from './account-deletion.js';
 export { deleteSubjectCascade } from './subject-deletion.js';
 export { moveTopic, deleteTopic } from './topic-tree.js';
 export type { MoveTopicInput } from './topic-tree.js';
+export { resolveAlgorithm, recalculateTopicSchedule, applyScheduleOverride } from './scheduling.js';
+export type { RecalculationResult, ScheduleOverride } from './scheduling.js';
+export { computeSubjectTopicMetrics, computeTopicMetrics } from './topic-metrics.js';
+export type { TopicScoreMetrics } from './topic-metrics.js';
 
 export type {
   PrismaClient,

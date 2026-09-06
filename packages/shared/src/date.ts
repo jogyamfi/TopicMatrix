@@ -5,6 +5,14 @@ export const timezoneSchema = z.string().refine((tz) => isValidTimezone(tz), {
   message: 'Must be a valid IANA timezone identifier',
 });
 
+// Date-only request fields (studiedOn, schedule overrides, history range filters, §6.3) are
+// always `YYYY-MM-DD` on the wire, parsed straight to the UTC-midnight storage representation —
+// never a full ISO instant, since a date-only field has no meaningful time-of-day component.
+export const dateOnlySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be an ISO date (YYYY-MM-DD)')
+  .transform((s) => new Date(`${s}T00:00:00.000Z`));
+
 export function isValidTimezone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });

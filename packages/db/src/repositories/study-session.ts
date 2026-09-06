@@ -19,6 +19,8 @@ export type UpdateStudySessionInput = Partial<
 
 export interface StudySessionRepository {
   listByTopic(userId: string, topicId: string): Promise<StudySession[]>;
+  /** Every session for every topic in a subject, in one query (P5) — avoids an N+1 when scoring a whole tree. */
+  listBySubject(userId: string, subjectId: string): Promise<StudySession[]>;
   findById(userId: string, sessionId: string): Promise<StudySession | null>;
   /** `accuracy` is always computed here from questionsCorrect/questionsAttempted (FR-4.2) — never accepted as input. */
   create(userId: string, input: CreateStudySessionInput): Promise<StudySession>;
@@ -29,6 +31,9 @@ export interface StudySessionRepository {
 function computeAccuracy(questionsAttempted: number, questionsCorrect: number): number {
   if (questionsAttempted <= 0) {
     throw new AppError('VALIDATION_FAILED', 'questionsAttempted must be at least 1');
+  }
+  if (questionsCorrect < 0 || questionsCorrect > questionsAttempted) {
+    throw new AppError('VALIDATION_FAILED', 'questionsCorrect must be between 0 and questionsAttempted');
   }
   return questionsCorrect / questionsAttempted;
 }
@@ -46,6 +51,11 @@ export function createStudySessionRepository(client: PrismaClientOrTx): StudySes
     listByTopic: (userId, topicId) =>
       client.studySession.findMany({
         where: { topicId, userId },
+        orderBy: { studiedOn: 'desc' },
+      }),
+    listBySubject: (userId, subjectId) =>
+      client.studySession.findMany({
+        where: { userId, topic: { subjectId } },
         orderBy: { studiedOn: 'desc' },
       }),
     findById: (userId, sessionId) => client.studySession.findFirst({ where: { id: sessionId, userId } }),
