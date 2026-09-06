@@ -6,9 +6,15 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   // Pinned explicitly: newer esbuild (see root package.json overrides) fails to transform
-  // destructuring for Vite's default legacy browser target list.
+  // destructuring for Vite's default legacy browser target list — both for the production build
+  // AND the dev-server's dependency pre-bundler (a separate esbuild pass with its own target).
   build: {
     target: 'es2022',
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: 'es2022',
+    },
   },
   server: {
     proxy: {

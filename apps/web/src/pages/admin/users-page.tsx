@@ -1,0 +1,139 @@
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Plus } from 'lucide-react';
+import { adminUpdateUserResponseSchema, adminUsersListResponseSchema, type AdminUserView } from '@topicmatrix/shared';
+import { apiFetch, ApiError } from '../../lib/api-client';
+import { queryKeys } from '../../lib/query-client';
+import { invalidations } from '../../lib/invalidations';
+import { toast } from '../../lib/toast-store';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import { Skeleton } from '../../components/ui/skeleton';
+import { EmptyState } from '../../components/empty-state';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
+import { CreateUserDialog } from './create-user-dialog';
+import { DeleteUserDialog } from './delete-user-dialog';
+
+export default function AdminUsersPage(): React.JSX.Element {
+  const usersQuery = useQuery({
+    queryKey: queryKeys.admin.users(),
+    queryFn: () => apiFetch('/admin/users', adminUsersListResponseSchema),
+  });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUserView | null>(null);
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: (user: AdminUserView) =>
+      apiFetch(`/admin/users/${user.id}`, adminUpdateUserResponseSchema, {
+        method: 'PATCH',
+        body: { isActive: !user.isActive },
+      }),
+    onSuccess: async (data) => {
+      await invalidations.afterAdminUserUpdate();
+      toast({ title: data.user.isActive ? 'User enabled' : 'User disabled' });
+    },
+    onError: (err) => {
+      toast({ title: 'Could not update user', description: describeError(err), variant: 'destructive' });
+    },
+  });
+
+  return (
+    <div className="flex flex-col gap-6">
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle>Users</CardTitle>
+            <CardDescription>Create, disable and remove learner and admin accounts.</CardDescription>
+          </div>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus />
+            New user
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {usersQuery.isPending ? (
+            <div className="space-y-2">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ) : usersQuery.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              Could not load users: {describeError(usersQuery.error)}
+            </p>
+          ) : usersQuery.data.users.length === 0 ? (
+            <EmptyState title="No users yet" description="Create the first account to get started." />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {usersQuery.data.users.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell className="font-medium">{user.displayName}</TableCell>
+                    <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                    <TableCell>
+                      <Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>{user.role}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={user.isActive ? 'secondary' : 'destructive'}>
+                        {user.isActive ? 'Active' : 'Disabled'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={toggleActiveMutation.isPending}
+                          onClick={() => toggleActiveMutation.mutate(user)}
+                        >
+                          {user.isActive ? 'Disable' : 'Enable'}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setDeleteTarget(user)}>
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <DeleteUserDialog user={deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)} />
+    </div>
+  );
+}
+
+export function describeError(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return 'Unknown error';
+}

@@ -1,33 +1,82 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense } from 'react';
+import { Outlet, Route, RouterProvider, createBrowserRouter, createRoutesFromElements } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/query-client';
+import { ThemeProvider } from './context/theme-context';
+import { AuthProvider } from './context/auth-context';
+import { Toaster } from './components/toaster';
+import { TooltipProvider } from './components/ui/tooltip';
+import { Skeleton } from './components/ui/skeleton';
+import { AppShell } from './components/layout/app-shell';
+import {
+  AdminRoute,
+  ProtectedRoute,
+  PublicOnlyRoute,
+  RequirePasswordChanged,
+} from './components/layout/route-guards';
 
-interface HealthResponse {
-  status: string;
+// Route-level code splitting (P6 task 1) — each page is its own chunk.
+const LoginPage = lazy(() => import('./pages/login-page'));
+const ChangePasswordPage = lazy(() => import('./pages/change-password-page'));
+const DashboardPage = lazy(() => import('./pages/dashboard-page'));
+const AdminUsersPage = lazy(() => import('./pages/admin/users-page'));
+const NotFoundPage = lazy(() => import('./pages/not-found-page'));
+
+function PageFallback(): React.JSX.Element {
+  return (
+    <div className="p-6">
+      <Skeleton className="h-8 w-48" />
+    </div>
+  );
 }
 
-// Proves the T1 loop end to end: Vite -> proxy -> Node API -> shared health route.
-// Replaced by the real dashboard shell at P6.
-export default function App(): React.JSX.Element {
-  const [health, setHealth] = useState<'checking' | 'ok' | 'error'>('checking');
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/healthz')
-      .then((res) => res.json() as Promise<HealthResponse>)
-      .then((data) => {
-        if (!cancelled) setHealth(data.status === 'ok' ? 'ok' : 'error');
-      })
-      .catch(() => {
-        if (!cancelled) setHealth('error');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+// A single Suspense boundary for every lazily-loaded route. `useMatches`/route `handle` (used by
+// Breadcrumbs) only work under a "data router" (createBrowserRouter), not plain <BrowserRouter>.
+function RootLayout(): React.JSX.Element {
   return (
-    <main>
-      <h1>TopicMatrix</h1>
-      <p>API health: {health}</p>
-    </main>
+    <Suspense fallback={<PageFallback />}>
+      <Outlet />
+    </Suspense>
+  );
+}
+
+const router = createBrowserRouter(
+  createRoutesFromElements(
+    <Route element={<RootLayout />}>
+      <Route element={<PublicOnlyRoute />}>
+        <Route path="/login" element={<LoginPage />} />
+      </Route>
+      <Route element={<ProtectedRoute />}>
+        <Route element={<AppShell />}>
+          <Route
+            path="/change-password"
+            element={<ChangePasswordPage />}
+            handle={{ breadcrumb: 'Change password' }}
+          />
+          <Route element={<RequirePasswordChanged />}>
+            <Route index element={<DashboardPage />} handle={{ breadcrumb: 'Dashboard' }} />
+            <Route element={<AdminRoute />}>
+              <Route path="/admin/users" element={<AdminUsersPage />} handle={{ breadcrumb: 'Users' }} />
+            </Route>
+          </Route>
+        </Route>
+      </Route>
+      <Route path="*" element={<NotFoundPage />} />
+    </Route>,
+  ),
+);
+
+export default function App(): React.JSX.Element {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <AuthProvider>
+          <TooltipProvider>
+            <RouterProvider router={router} />
+            <Toaster />
+          </TooltipProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }

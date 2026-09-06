@@ -761,5 +761,146 @@ runtime-tested here"/P11 status; `npm run test:cf` still green).
   to `packages/core` must stay that way, since both `apps/api` and `apps/worker` now pull it in
   through `db`/`api-core`.
 
+## P6 — Web Application Shell
+
+**Status:** Complete. Verified live end-to-end in a real browser (Node/SQLite, T1 loop) — login,
+forced password change, dashboard, dark theme, and the full admin user CRUD cycle.
+
+### What shipped
+
+- **Vite + React 18 + React Router**, `apps/web`: a **data router**
+  (`createBrowserRouter`/`createRoutesFromElements`/`RouterProvider`), not the plain
+  `<BrowserRouter>` — required because `useMatches`/route `handle` (used by `Breadcrumbs`) only
+  work under a data router. Every page (`login`, `change-password`, `dashboard`, `admin/users`,
+  `not-found`) is `React.lazy`-loaded, each its own build chunk (verified via `npm run build -w
+  apps/web`'s per-chunk output), behind one root `Suspense` boundary.
+- **Tailwind + a small shadcn/ui-style primitive set** (`src/components/ui/`): button, input,
+  label, card, badge, table, dialog, tabs, tooltip, popover, select, toast, skeleton — Radix
+  primitives + `class-variance-authority` + the standard `cn()` (`clsx` + `tailwind-merge`)
+  helper. Design tokens (`index.css`, HSL CSS variables) define light/dark palettes plus a
+  dedicated **health-status palette** (`--health-strong/needs-review/at-risk/not-started`) for
+  P7+ to consume via `HealthStatusBadge`. `tailwindcss-animate` was dropped (blocked by the
+  corporate npm proxy, see repo memory) — the handful of animations it would have provided
+  (accordion, fade) are hand-written keyframes in `tailwind.config.js` instead.
+- **Typed API client** (`src/lib/api-client.ts`): `apiFetch<S extends ZodType>(path, schema,
+  opts)` parses every response through a Zod schema at the boundary (`schema.safeParse`, throws
+  loudly on mismatch) and implements silent-refresh-on-401-then-replay-once. New response schemas
+  were added to `packages/shared/src/auth.ts` (`publicUserSchema`, `authResponseSchema`,
+  `statusResponseSchema`, `adminUserViewSchema`, `adminUsersListResponseSchema`,
+  `adminCreateUserResponseSchema`, `adminUpdateUserResponseSchema`) — `packages/shared` is now the
+  source of truth for response shapes too, not just requests.
+- **TanStack Query** (`src/lib/query-client.ts`): a `queryKeys` factory (currently just
+  `admin.users()`) and one `staleTime`/`retry` default. `src/lib/invalidations.ts` is the single
+  place mapping mutations → invalidated keys (`afterAdminUserCreate/Update/Delete`) — the
+  convention P7+ should extend rather than calling `queryClient.invalidateQueries` ad hoc from
+  inside components.
+- **Auth flow**: the access token lives **only** in memory (SEC-2), in a framework-agnostic
+  `authStore` module (`src/lib/auth-store.ts`, same external-store pattern used later for
+  `toast-store.ts`) — never `localStorage`. `AuthProvider` (`useSyncExternalStore`) bootstraps a
+  session from the HttpOnly refresh cookie on mount. Login → forced password-change (blocks
+  navigation elsewhere while `mustChangePassword` is true, mirroring the server's
+  `requirePasswordChanged` middleware) → logout, all live-tested in a browser.
+- **Route guards** (`src/components/layout/route-guards.tsx`): `ProtectedRoute` (redirect
+  unauthenticated → `/login`, preserving `state.from`), `RequirePasswordChanged`, `AdminRoute`,
+  `PublicOnlyRoute` (keeps an authenticated user off `/login`).
+- **App shell** (`src/components/layout/app-shell.tsx`): responsive nav — a static sidebar on
+  desktop (`sidebar.tsx`), a Radix-Dialog-based drawer on mobile (`mobile-nav.tsx`, gets
+  focus-trap/Escape-to-close for free) — a header slot (breadcrumbs via route `handle` +
+  `useMatches`, theme toggle, user menu), a toast host, and a global `ErrorBoundary` wrapping
+  every routed page so one broken screen doesn't take down the shell.
+- **Theming** (`src/context/theme-context.tsx`): light/dark/system, persisted to `localStorage`,
+  reacts to OS-level `prefers-color-scheme` changes while `theme === 'system'`. No flash of wrong
+  theme on load — `index.html` has an inline pre-paint script applying the resolved theme class
+  before React mounts; `ThemeProvider` keeps it in sync afterward.
+- **Accessibility baseline (NF-4)**: a skip link (`.skip-link`, visually hidden until focused), a
+  visible `:focus-visible` ring on every interactive element (never suppressed), focus moved to
+  `#main-content` on every route change (`use-route-focus.ts`), an `aria-live` toast region (built
+  into Radix Toast's viewport), and **`HealthStatusBadge`** (`src/components/health-status-badge.tsx`)
+  — established now, for P7+ to reuse: every health status is an icon + text pairing, never
+  colour alone.
+- **Admin user management screens** (`src/pages/admin/`): list (table, real data via
+  `GET /admin/users`), create (dialog → shows the generated temporary password exactly once, with
+  a copy-to-clipboard button), disable/enable (PATCH `isActive`), delete (typed-display-name
+  confirmation gates the destructive button, per FR-1.8). All three mutations wired through
+  `invalidations.ts`; the list re-renders immediately after each.
+- **Loading/empty states**: `Skeleton` (ui primitive) and `EmptyState` (`src/components/
+  empty-state.tsx`) used consistently — the users table shows skeleton rows while loading and an
+  `EmptyState` if the list is genuinely empty; the dashboard placeholder uses the same
+  `EmptyState` for "no subjects yet".
+
+### Two real bugs found and fixed while browser-testing this (read before touching auth/routing again)
+
+1. **`useMatches` needs a data router.** `Breadcrumbs` (via route `handle`) initially crashed
+   every render with "useMatches must be used within a data router" because `App.tsx` used plain
+   `<BrowserRouter><Routes>...`. Fixed by switching to `createBrowserRouter`/`RouterProvider` with
+   a pathless root layout route (`RootLayout`) providing the one `Suspense` boundary every lazy
+   page needs.
+2. **A genuine redirect-loop bug, not a network race** (worth remembering the debugging path,
+   not just the fix): after changing password, `ChangePasswordPage` calls `authStore.reset()`
+   then `navigate('/login', { replace: true })`. But `authStore.reset()` also triggers a
+   re-render of the *still-mounted* `ProtectedRoute` (now unauthenticated), which independently
+   renders its own `<Navigate to="/login" replace state={{ from: location }} />` — where
+   `location` at that instant is `/change-password`. Both redirects target `/login`, and
+   whichever's `history.replaceState` call lands last wins the entry's `state`. The next explicit
+   login then read `state.from.pathname === '/change-password'` and navigated straight back there
+   even though the fresh login response's `mustChangePassword` was correctly `false` (verified
+   directly against the API with `curl`/`Invoke-WebRequest`, bypassing the frontend entirely, to
+   rule out a backend bug first). **Fix**: `LoginPage` now refuses to treat `/login` or
+   `/change-password` themselves as a valid `state.from` redirect target — auth-flow pages are
+   never a meaningful "return to" destination. (An unrelated epoch-guard was added to
+   `auth-store.ts`'s `refresh()` first, on a *wrong* initial hypothesis that a slow mount-time
+   bootstrap refresh was clobbering a fresher login; that guard is harmless and worth keeping as
+   real defence-in-depth for that separate, still-plausible race, but it was **not** what caused
+   this particular bug — the redirect-loop fix above was.)
+- **Vite dev-server dependency pre-bundling needed the same `esbuild` target fix as the
+  production build** — P0's `build.target: 'es2022'` only covers the production build step; the
+  dev server's separate dependency optimizer (its own `esbuild` pass over `node_modules`, used to
+  pre-bundle things like Radix packages) has its own target and broke on the first `npm run dev`
+  with "Transforming destructuring ... is not supported yet" for every `@radix-ui/*` package.
+  Fixed with `optimizeDeps.esbuildOptions.target: 'es2022'` alongside the existing `build.target`
+  in `apps/web/vite.config.ts`. Recorded in repo memory since this is exactly the kind of
+  machine-specific esbuild-override fallout the P0 note already tracks.
+
+### Deferred / not in scope for P6
+
+- **Real subject/topic data on the dashboard** — deliberately a placeholder `EmptyState`
+  ("Subjects and topics arrive in the next phase of TopicMatrix"); P7 is the first real consumer.
+- **`tailwindcss-animate`** — blocked by the corporate npm proxy (403 on that exact package);
+  substituted with three hand-written keyframes (`accordion-down/up`, `fade-in`) in
+  `tailwind.config.js`. Revisit if a future component needs a animation the hand-written set
+  doesn't cover.
+- PostgreSQL/D1 remain in their inherited states — this phase didn't touch persistence.
+- No E2E (Playwright) suite yet — explicitly a P10 task.
+
+### Decisions taken
+
+- **`createBrowserRouter` (data router), not `<BrowserRouter>`** — required for `useMatches`/route
+  `handle`-based breadcrumbs; every future route addition should go through
+  `createRoutesFromElements` in `App.tsx`, not a parallel `<Routes>` tree.
+- **Auth token and toast state both live in small framework-agnostic external stores**
+  (`auth-store.ts`, `toast-store.ts`), not React Context alone — lets `apiFetch`, mutation
+  `onError` handlers, and other non-component code call `authStore.refresh()`/`toast()` directly
+  without needing a hook.
+- **Response schemas belong in `packages/shared`, alongside request schemas** — extends the
+  existing "Zod schemas are the single source of truth" convention (P0 task 2) from requests to
+  responses; the typed API client's `schema.safeParse` on every call is what makes a future
+  backend/frontend shape drift a loud build/runtime error instead of a silent `undefined`.
+- **Auth-flow pages (`/login`, `/change-password`) are never a valid `state.from` redirect
+  target** — see bug #2 above; a general rule worth keeping for any future auth-adjacent route.
+
+### Handover to P7+
+
+- `NAV_ITEMS`/`navItemsFor(role)` (`src/components/layout/nav-items.ts`) is where P7 adds
+  Subjects/Topics navigation entries.
+- `HealthStatusBadge`, `EmptyState`, `Skeleton`, the `Table`/`Card`/`Dialog`/`Tabs` primitives, and
+  the `queryKeys`/`invalidations` conventions are all ready for P7's subject/topic screens to
+  reuse directly — no new pattern should be needed for basic CRUD list/detail/dialog screens.
+- The typed API client (`apiFetch`) and the "add response schemas to `packages/shared`" convention
+  is how every future endpoint should be consumed — see `admin/users-page.tsx` and its two dialogs
+  for the reference shape (query + mutation + invalidation + Zod-parsed response).
+- If a future phase adds another page that can redirect back to itself post-login (unlikely, but
+  worth checking), extend `NON_REDIRECT_TARGETS` in `login-page.tsx` rather than special-casing it
+  elsewhere.
+
 
 

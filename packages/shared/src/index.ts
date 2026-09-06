@@ -35,6 +35,13 @@ export {
   adminCreateUserRequestSchema,
   adminUpdateUserRequestSchema,
   adminDeleteUserRequestSchema,
+  publicUserSchema,
+  authResponseSchema,
+  statusResponseSchema,
+  adminUserViewSchema,
+  adminUsersListResponseSchema,
+  adminCreateUserResponseSchema,
+  adminUpdateUserResponseSchema,
 } from './auth.js';
 export type {
   LoginRequest,
@@ -42,6 +49,13 @@ export type {
   AdminCreateUserRequest,
   AdminUpdateUserRequest,
   AdminDeleteUserRequest,
+  PublicUser,
+  AuthResponse,
+  StatusResponse,
+  AdminUserView,
+  AdminUsersListResponse,
+  AdminCreateUserResponse,
+  AdminUpdateUserResponse,
 } from './auth.js';
 export {
   createSubjectRequestSchema,

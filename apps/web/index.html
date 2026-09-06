@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TopicMatrix</title>
+    <script>
+      // Applies the persisted/OS theme before first paint (FR-8.3) — no flash of wrong theme.
+      (function () {
+        try {
+          var stored = localStorage.getItem('topicmatrix.theme');
+          var theme = stored === 'light' || stored === 'dark' ? stored : 'system';
+          var resolved =
+            theme === 'system'
+              ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+              : theme;
+          if (resolved === 'dark') document.documentElement.classList.add('dark');
+        } catch (e) {
+          /* localStorage unavailable (e.g. privacy mode) — default light theme is fine. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
