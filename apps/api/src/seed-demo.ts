@@ -6,7 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { parseConfig } from '@topicmatrix/shared';
-import { createDb, type Db } from '@topicmatrix/db';
+import type { Db } from '@topicmatrix/db';
+import { createNodeDb } from '@topicmatrix/db/node';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
@@ -141,7 +142,7 @@ async function seedTopic(
 
 async function main(): Promise<void> {
   const config = parseConfig(process.env);
-  const db = createDb(config);
+  const db = createNodeDb(config);
 
   try {
     const existing = await db.users.findByEmailNormalised(DEMO_EMAIL);

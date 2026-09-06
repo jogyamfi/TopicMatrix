@@ -2,9 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
-    "types": []
+    "types": ["node"]
   },
-  "include": ["src"],
+  "include": ["src", "test"],
   "references": [{ "path": "../shared" }, { "path": "../db" }]
 }

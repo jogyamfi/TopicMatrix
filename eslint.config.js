@@ -49,7 +49,7 @@ export default tseslint.config(
     // The integration test harness shells out to the Prisma CLI to provision a scratch
     // database — Node-only dev/CI tooling, never shipped to a Worker, same rationale as
     // scripts/**.mjs below (NF-13 governs application code, not test/dev tooling).
-    files: ['packages/db/test/**/*.ts'],
+    files: ['packages/db/test/**/*.ts', 'packages/api-core/test/**/*.ts'],
     rules: {
       'no-restricted-imports': 'off',
     },

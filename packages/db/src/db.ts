@@ -24,6 +24,7 @@ import {
   createRefreshTokenRepository,
   type RefreshTokenRepository,
 } from './repositories/refresh-token.js';
+import { createAuditLogRepository, type AuditLogRepository } from './repositories/audit-log.js';
 import type { PrismaClientOrTx } from './types.js';
 
 export interface Db {
@@ -37,6 +38,7 @@ export interface Db {
   competencySnapshots: CompetencySnapshotRepository;
   tags: TagRepository;
   refreshTokens: RefreshTokenRepository;
+  auditLogs: AuditLogRepository;
   unitOfWork: UnitOfWork;
   disconnect(): Promise<void>;
 }
@@ -53,6 +55,7 @@ export function buildRepositories(client: PrismaClientOrTx) {
     competencySnapshots: createCompetencySnapshotRepository(client),
     tags: createTagRepository(client),
     refreshTokens: createRefreshTokenRepository(client),
+    auditLogs: createAuditLogRepository(client),
   };
 }
 
@@ -102,6 +105,7 @@ function unimplementedD1Db(): Db {
     competencySnapshots: unimplemented('CompetencySnapshotRepository'),
     tags: unimplemented('TagRepository'),
     refreshTokens: unimplemented('RefreshTokenRepository'),
+    auditLogs: unimplemented('AuditLogRepository'),
     unitOfWork: createD1UnitOfWork(),
     disconnect: async () => {},
   };

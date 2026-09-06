@@ -4,6 +4,7 @@ export type { UnitOfWork } from './unit-of-work.js';
 export { createSqlUnitOfWork, createD1UnitOfWork } from './unit-of-work.js';
 export { createFixtures } from './fixtures.js';
 export type { Fixtures } from './fixtures.js';
+export { deleteUserAccount } from './account-deletion.js';
 
 export type {
   PrismaClient,
@@ -20,6 +21,7 @@ export type {
   Tag,
   TopicTag,
   RefreshToken,
+  AuditLog,
 } from './types.js';
 
 export type { UserRepository, CreateUserInput, UpdateUserInput } from './repositories/user.js';
@@ -51,3 +53,4 @@ export type {
   RefreshTokenRepository,
   CreateRefreshTokenInput,
 } from './repositories/refresh-token.js';
+export type { AuditLogRepository, CreateAuditLogInput } from './repositories/audit-log.js';

@@ -199,3 +199,19 @@ model RefreshToken {
 
   @@index([userId])
 }
+
+// P2 audit log (§11.2 A09): actor/action/target/timestamp only — no PII beyond user ids, never
+// credentials. Deliberately NOT a relation to User: an audit row must survive the actor or
+// target user being deleted (an onDelete: Restrict FK here would make FR-1.8 account deletion
+// impossible once that user has any audit history), so both ids are plain, unenforced strings.
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  targetId  String?
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}

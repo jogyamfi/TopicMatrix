@@ -19,7 +19,7 @@ export interface IntegrationTestContext {
   teardown: () => Promise<void>;
 }
 
-function testConfig(overrides: Partial<AppConfig>): AppConfig {
+export function testConfig(overrides: Partial<AppConfig>): AppConfig {
   return {
     databaseProvider: 'sqlite',
     databaseUrl: undefined,

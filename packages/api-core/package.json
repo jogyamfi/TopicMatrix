@@ -9,7 +9,9 @@
     "@topicmatrix/shared": "*",
     "@topicmatrix/db": "*",
     "hono": "^4.6.14",
-    "ulid": "^2.3.0"
+    "ulid": "^2.3.0",
+    "hash-wasm": "^4.12.0",
+    "jose": "^5.9.6"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

@@ -258,3 +258,125 @@ as load-bearing for every future phase that touches `packages/api-core` or `pack
 - `seed-admin.ts` is still the P0 placeholder (refuses to run, `exitCode = 1`) — P2 implements it
   for real now that `User`/`UserSettings` repositories exist.
 - Verify PostgreSQL for real (see Deferred) before building anything that assumes it works.
+
+## P2 — Identity, Sessions & Access Control
+
+**Status:** Complete (Node/SQLite path fully verified; PostgreSQL inherits P1's "generated but
+not runtime-tested here" status; Cloudflare Workers path has a real, documented gap — see below).
+
+### What shipped
+
+- **⚠️ Argon2id/Workers spike (the gating task) — done, with an unexpected result.**
+  `apps/worker/src/argon2-bench.cf.test.ts` proves, inside real `workerd`
+  (`@cloudflare/vitest-pool-workers`), that `hash-wasm`'s Argon2id **cannot run on Cloudflare
+  Workers at all**: it fails instantly with `WebAssembly.compile(): Wasm code generation
+  disallowed by embedder`, because hash-wasm dynamically compiles WebAssembly from an in-memory
+  buffer at runtime, and Workers only permits statically-`import`ed `.wasm` modules bundled at
+  build time. This is a hard platform incompatibility, not a CPU-budget problem — full writeup,
+  Node-side timing measurements for the candidate parameter sets, and the decision in
+  [`documents/planning/adr-002-password-hashing.md`](adr-002-password-hashing.md). Per the
+  instruction to escalate rather than weaken the hash: the chosen default (19,456 KiB, t=2, p=1)
+  is unchanged, `PasswordService` construction became a caller-supplied factory
+  (`BuildDepsOptions.createPasswordService`, mirroring `createDb`), `apps/api` wires the real
+  hash-wasm-backed one, and `apps/worker` wires `createUnavailablePasswordService(reason)` (fails
+  loudly and clearly if ever hit, rather than crashing deep in a dependency). **Wiring a real
+  Workers-compatible Argon2id implementation is now an explicit P11 dependency** — do not attempt
+  to fix this by weakening parameters; see the ADR's "Decision" section for candidates to
+  evaluate at P11.
+- **Password service** (`packages/api-core/src/auth/password.ts`): `hash`/`verify`/`needsRehash`
+  over hash-wasm's Argon2id, PHC-encoded hashes (self-describing — no separate salt/params
+  storage needed). Minimum length 12 + a small bundled common-password deny list
+  (`packages/shared/src/password-policy.ts`, SEC-3), enforced via Zod (`changePasswordRequestSchema`).
+- **Token service** (`packages/api-core/src/auth/tokens.ts`) using `jose`: 15-minute HS256 access
+  JWT (`sub`, `role`, `jti`, `exp`); 30-day opaque refresh token, generated and hashed via Web
+  Crypto only (`crypto.getRandomValues`/`crypto.subtle.digest`, no `node:crypto` — works
+  identically on Node and would work on Workers too, unlike Argon2).
+- **Auth routes** (`packages/api-core/src/routes/auth.ts`): `POST /auth/login` (generic
+  "Invalid email or password" for unknown email, wrong password, AND inactive account alike —
+  §11.2 A07 — verified via a fixed real dummy Argon2 hash so an unknown email still pays the full
+  hashing cost, for comparable timing), `/auth/refresh` (rotating: old token revoked, new one
+  issued and set), `/auth/logout` (revokes the presented refresh token), `/auth/change-password`
+  (revokes **all** the user's refresh tokens and clears `mustChangePassword`). Refresh token is an
+  `HttpOnly; Secure; SameSite=Strict` cookie (FR-1.3), never returned in a JSON body.
+- **Middleware** (`packages/api-core/src/middleware/auth.ts`): `requireAuth` (verifies the bearer
+  JWT, reloads the user, rejects if no longer `isActive`), `requireAdmin`, `requirePasswordChanged`
+  (blocks every route except `/auth/change-password` while `mustChangePassword` is true, FR-1.6 —
+  applied so far to `/admin/*`; every future phase adding authenticated routes must chain it too).
+- **Rate limiting** (`packages/api-core/src/rate-limiter.ts`): a real in-memory `RateLimiter` —
+  10 attempts / 15 min, keyed by IP **and** by normalised email independently (FR-1.10) — wired
+  into `apps/api` as a genuine, deliberate exception to "rebuilt per request" (a rate limiter
+  needs cross-request state to mean anything; constructed once at Node module scope, the same
+  instance passed into every `buildDeps` call). `apps/worker` still gets `createAllowAllRateLimiter`
+  — a real Workers-binding-backed limiter is P11 scope, same as the D1 repositories.
+- **Client IP resolution** (`ClientIpResolver`, another caller-supplied `buildDeps` factory):
+  `apps/api` uses `@hono/node-server/conninfo`'s real socket address; `apps/worker` uses the
+  Cloudflare-trusted `CF-Connecting-IP` header (never raw `X-Forwarded-For`, SEC).
+- **Admin user management** (`packages/api-core/src/routes/admin-users.ts`), all under
+  `requireAuth, requirePasswordChanged, requireAdmin`: `GET/POST /admin/users`,
+  `PATCH/DELETE /admin/users/:id`. Create issues a random temporary password (shown once in the
+  response only, never logged/stored in plaintext) with `mustChangePassword=true`; delete requires
+  an explicit `{ confirm: true }` body field (FR-1.8) and cascades the ENTIRE account — subjects,
+  topics, sessions, schedules, snapshots, tags, tag associations, refresh tokens, settings — inside
+  one `UnitOfWork` in dependency order (`packages/db/src/account-deletion.ts`'s
+  `deleteUserAccount`, since every relation is `onDelete: Restrict`, P1). A test proves no
+  `/admin` route ever exposes subjects/topics/sessions (SRS §16 Q7).
+- **Audit logging** (`packages/api-core/src/audit.ts` + a new `AuditLog` model/repository,
+  `packages/db/src/repositories/audit-log.ts`): auth success/failure, logout, password change,
+  and every admin user-management action — actor id, action, target id, small non-PII metadata,
+  timestamp. Deliberately **not** a DB relation to `User` (an audit row must outlive the user it
+  describes being deleted); a failed audit write is logged and swallowed, never breaks the
+  request it's attached to.
+- **Security headers + CORS** (`packages/api-core/src/middleware/security.ts`, via `hono/secure-headers`
+  and `hono/cors`): CSP with no `unsafe-inline`, HSTS, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer` (SEC-6) applied globally; CORS reflects only an allow-listed
+  origin from `config.corsOrigins`, read fresh per request (SEC-7).
+- **`seed-admin.ts` implemented for real** (FR-1.9): refuses to run if any user exists, creates
+  the first `ADMIN` with a random temporary password (printed once) and `mustChangePassword=true`.
+- **A real, pre-existing bug found and fixed along the way**: `seed-demo.ts` (P1) imported
+  `createDb` from the main `@topicmatrix/db` barrel (which only ever constructs a `d1` stub) —
+  `npm run seed:demo` had been broken since whenever that barrel split landed and nobody had run
+  it since. Fixed to import `createNodeDb` from `@topicmatrix/db/node`, same as every other
+  Node-context caller; re-verified end to end (`npm run db:reset && npm run seed:admin && npm run
+  seed:demo`).
+- **Tests**: 61 unit tests (password hashing incl. Node timing numbers for the ADR, token
+  sign/verify, rate limiter, Zod schemas, security headers, CORS), 40 SQLite integration tests
+  covering the full login → refresh-rotation → logout cycle, rate-limit 429 on the 11th attempt,
+  change-password revoking existing sessions, every admin CRUD path, LEARNER 403 on every
+  `/admin` route, unauthenticated 401, `mustChangePassword` lockout, cascade-delete, and the
+  explicit-confirm-required delete guard. Plus the `argon2-bench.cf.test.ts` Workers-incompatibility
+  regression test (`npm run test:cf`).
+
+### Deferred / not in scope for P2
+
+- **A working Argon2id implementation for Cloudflare Workers** — see the spike finding above.
+  `apps/worker`'s auth routes will throw a clear `INTERNAL_ERROR` if actually invoked until P11
+  resolves this. This does not affect T1/T2 (Node) or NF-11a (Cloudflare tooling stays optional).
+- **A real Workers-binding rate limiter** — `apps/worker` still uses allow-all; P11 wires
+  Cloudflare's Rate Limiting API, same phase that wires D1 repositories.
+- Self-registration doesn't exist (by design — all users are admin-created, FR-1.8/FR-1.9).
+- No protection yet against an admin deleting/disabling their own account (last-admin lockout) —
+  not called for by any P2 requirement; worth a look if it becomes a real support headache.
+
+### Decisions taken
+
+- **`PasswordService`, `RateLimiter`, and `ClientIpResolver` are all caller-supplied factories
+  in `BuildDepsOptions`**, exactly like `createDb` — the P1 lesson ("nothing reachable from
+  api-core's shared import graph may assume a Node-only or Workers-only implementation") now
+  applies to three things, not just the DB.
+- Login failures are indistinguishable (status, body, and — as far as a fixed dummy Argon2 hash
+  can achieve — timing) for unknown email, wrong password, and inactive account alike.
+- Account deletion cascades are hand-written raw-Prisma deletes inside `UnitOfWork.run`
+  (`packages/db/src/account-deletion.ts`) rather than repository methods, since it's a rare,
+  whole-account, cross-every-aggregate operation — revisit if a second caller needs it.
+
+### Handover to P3/P4
+
+- P3 (domain engine) has no dependency on P2 and can proceed independently, as planned.
+- P4 (subjects/topics API) will be the first phase to add authenticated, per-user-resource
+  routes: remember to chain `requireAuth` (and `requirePasswordChanged`) on every one of them,
+  and to write the cross-user 404 (not 403) test for every new repository method, per the P1/P2
+  convention.
+- Whoever picks up P11: start with ADR-002's "Decision" section (candidate Workers-compatible
+  Argon2id implementations) before touching anything else Workers-auth-related — the D1
+  repositories, D1 `UnitOfWork`, and now Argon2id are the three things P11 must wire for real.
+

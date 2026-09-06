@@ -28,6 +28,8 @@ export interface UserRepository {
   findById(id: string): Promise<User | null>;
   findByEmailNormalised(emailNormalised: string): Promise<User | null>;
   update(id: string, patch: UpdateUserInput): Promise<User>;
+  /** Admin user management (FR-1.8) — every user, newest first. */
+  list(): Promise<User[]>;
 }
 
 export function createUserRepository(client: PrismaClientOrTx): UserRepository {
@@ -45,5 +47,6 @@ export function createUserRepository(client: PrismaClientOrTx): UserRepository {
     findByEmailNormalised: (emailNormalised) =>
       client.user.findUnique({ where: { emailNormalised } }),
     update: (id, patch) => client.user.update({ where: { id }, data: patch }),
+    list: () => client.user.findMany({ orderBy: { createdAt: 'desc' } }),
   };
 }

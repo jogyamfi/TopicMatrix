@@ -24,4 +24,5 @@ export type {
   Tag,
   TopicTag,
   RefreshToken,
+  AuditLog,
 } from '../generated/sqlite/index.js';

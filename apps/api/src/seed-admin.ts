@@ -1,17 +1,73 @@
-// One-time seed CLI (FR-1.9): refuses to run if any user exists. Real implementation
-// arrives at P2 once the User model and repository layer exist (P1). This placeholder
-// exists so `npm run seed:admin` is a wired, discoverable command from P0 onward.
+// One-time seed CLI (FR-1.9): creates the first ADMIN user. Node-only (apps/api is the only
+// place Node built-ins are allowed, NF-13). Refuses to run if any user already exists, so it
+// can never be used to create a second admin or reset an existing deployment by accident.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { parseConfig } from '@topicmatrix/shared';
+import { createNodeDb } from '@topicmatrix/db/node';
+import { createPasswordService, randomOpaqueToken } from '@topicmatrix/api-core';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
 
-console.log(
-  JSON.stringify({
-    level: 'info',
-    message: 'seed:admin is not implemented yet — the User model lands at P1, the seed logic at P2.',
-  }),
-);
-process.exitCode = 1;
+const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@example.com';
+const ADMIN_DISPLAY_NAME = process.env.SEED_ADMIN_DISPLAY_NAME ?? 'Administrator';
+
+async function main(): Promise<void> {
+  const config = parseConfig(process.env);
+  const db = createNodeDb(config);
+
+  try {
+    const existingCount = await db.users.count();
+    if (existingCount > 0) {
+      console.log(
+        JSON.stringify({
+          level: 'error',
+          message: 'seed:admin refused: at least one user already exists (FR-1.9)',
+        }),
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    const passwordService = createPasswordService({
+      memoryKib: config.argon2MemoryKib,
+      iterations: config.argon2Iterations,
+    });
+    const temporaryPassword = randomOpaqueToken(9);
+    const passwordHash = await passwordService.hash(temporaryPassword);
+
+    const admin = await db.users.create({
+      email: ADMIN_EMAIL,
+      emailNormalised: ADMIN_EMAIL.toLowerCase(),
+      passwordHash,
+      displayName: ADMIN_DISPLAY_NAME,
+      role: 'ADMIN',
+      mustChangePassword: true,
+    });
+    await db.userSettings.createDefault(admin.id);
+
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        message: 'seed:admin complete — record this password now, it is never shown again',
+        email: admin.email,
+        temporaryPassword,
+      }),
+    );
+  } finally {
+    await db.disconnect();
+  }
+}
+
+main().catch((err: unknown) => {
+  console.log(
+    JSON.stringify({
+      level: 'error',
+      message: 'seed:admin failed',
+      error: err instanceof Error ? err.message : String(err),
+    }),
+  );
+  process.exitCode = 1;
+});

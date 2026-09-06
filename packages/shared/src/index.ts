@@ -21,3 +21,18 @@ export type {
   TopicDeleteMode,
   ManualIntervals,
 } from './domain.js';
+export { MIN_PASSWORD_LENGTH, COMMON_PASSWORDS, validatePassword } from './password-policy.js';
+export {
+  loginRequestSchema,
+  changePasswordRequestSchema,
+  adminCreateUserRequestSchema,
+  adminUpdateUserRequestSchema,
+  adminDeleteUserRequestSchema,
+} from './auth.js';
+export type {
+  LoginRequest,
+  ChangePasswordRequest,
+  AdminCreateUserRequest,
+  AdminUpdateUserRequest,
+  AdminDeleteUserRequest,
+} from './auth.js';
