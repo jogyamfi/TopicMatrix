@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Deliberately NOT "dist" — that's wrangler's `--outdir` for the deployable bundle
+    // (`npm run build`). Sharing a folder let stray tsc output (including compiled test
+    // files) leak into the bundle-size gate's measurement.
+    "outDir": "build",
+    "rootDir": "src",
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"]
+  },
+  "include": ["src"],
+  "references": [{ "path": "../../packages/api-core" }, { "path": "../../packages/shared" }, { "path": "../../packages/db" }]
+}

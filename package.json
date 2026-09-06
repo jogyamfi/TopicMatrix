@@ -1,0 +1,62 @@
+{
+  "name": "topicmatrix",
+  "private": true,
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "dev:pg": "cross-env DATABASE_PROVIDER=postgresql npm run dev",
+    "dev:cf": "npm run dev -w apps/worker",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint .",
+    "typecheck": "tsc --build",
+    "test": "vitest run",
+    "test:cf": "vitest run --config vitest.workers.config.ts",
+    "test:watch": "vitest",
+    "db:generate-schemas": "tsx scripts/generate-schemas.ts",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:reset": "node scripts/db-reset.mjs",
+    "db:studio": "node scripts/db-studio.mjs",
+    "seed:admin": "npm run seed:admin -w apps/api",
+    "deploy:cf": "npm run deploy -w apps/worker"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.6.9",
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "dotenv": "^16.4.7",
+    "eslint": "^9.17.0",
+    "@eslint/js": "^9.17.0",
+    "typescript-eslint": "^8.18.1",
+    "prettier": "^3.4.2",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "overrides": {
+    "esbuild": "0.28.2",
+    "devalue": "5.9.2"
+  },
+  "description": "",
+  "main": "eslint.config.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jogyamfi/TopicMatrix.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/jogyamfi/TopicMatrix/issues"
+  },
+  "homepage": "https://github.com/jogyamfi/TopicMatrix#readme"
+}

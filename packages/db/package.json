@@ -1,0 +1,15 @@
+{
+  "name": "@topicmatrix/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@prisma/adapter-d1": "^6.19.3",
+    "@prisma/client": "^6.19.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

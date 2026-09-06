@@ -1,0 +1,23 @@
+{
+  "name": "@topicmatrix/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -b",
+    "start": "tsx src/index.ts",
+    "seed:admin": "tsx src/seed-admin.ts"
+  },
+  "dependencies": {
+    "@topicmatrix/api-core": "*",
+    "@hono/node-server": "^1.13.7",
+    "dotenv": "^16.4.7",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,8 @@
+// Shared model fragment (SRS §6.3). No enum, no Json, no Decimal, no @db.* native attributes,
+// no arrays — enum-like fields are String plus a TS union in packages/shared instead.
+// The real schema (User, Subject, Topic, ...) is modelled at P1; this placeholder entity only
+// exists so the multi-provider generation pipeline and migrations can be proven end to end.
+model HealthCheck {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+}

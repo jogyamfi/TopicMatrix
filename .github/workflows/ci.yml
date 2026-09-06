@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [sqlite, postgresql]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: topicmatrix
+          POSTGRES_PASSWORD: topicmatrix
+          POSTGRES_DB: topicmatrix
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U topicmatrix"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-test-only-secret-at-least-32-characters
+      DATABASE_PROVIDER: ${{ matrix.provider }}
+      DATABASE_URL: ${{ matrix.provider == 'sqlite' && 'file:./dev.db' || 'postgresql://topicmatrix:topicmatrix@localhost:5432/topicmatrix' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      # Dependency audit gate (SEC-9) is a P10 deliverable, not P0 — deferred so dev-only
+      # Cloudflare tooling transitive advisories don't block this phase's CI.
+      - name: Verify T1 loop (db:migrate against ${{ matrix.provider }})
+        run: npm run db:migrate
+      - run: npm run build
+
+  worker-bundle-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build Worker bundle
+        run: npm run build -w apps/worker
+      - name: Enforce 3 MB compressed bundle-size limit (NF-14)
+        run: node scripts/check-bundle-size.mjs apps/worker/dist 3145728
+
+  worker-d1-spike:
+    # Cloudflare tooling (wrangler, workerd) is optional for T1 (NF-11a) — this job proves the
+    # D1 spike (ADR-001) but never blocks the T1-critical job above if it were to fail.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:cf
