@@ -24,6 +24,9 @@ const SubjectsPage = lazy(() => import('./pages/subjects/subjects-page'));
 const SubjectTreePage = lazy(() => import('./pages/subjects/subject-tree-page'));
 const TopicDetailPage = lazy(() => import('./pages/topics/topic-detail-page'));
 const TagsPage = lazy(() => import('./pages/tags/tags-page'));
+const ReviewQueuePage = lazy(() => import('./pages/review/review-queue-page'));
+const LauncherPage = lazy(() => import('./pages/review/launcher-page'));
+const AnalyticsPage = lazy(() => import('./pages/analytics/analytics-page'));
 const NotFoundPage = lazy(() => import('./pages/not-found-page'));
 
 function PageFallback(): React.JSX.Element {
@@ -67,6 +70,13 @@ const router = createBrowserRouter(
               handle={{ breadcrumb: 'Topic' }}
             />
             <Route path="/tags" element={<TagsPage />} handle={{ breadcrumb: 'Tags' }} />
+            <Route path="/review" element={<ReviewQueuePage />} handle={{ breadcrumb: 'Review' }} />
+            <Route
+              path="/review/launch"
+              element={<LauncherPage />}
+              handle={{ breadcrumb: 'Review session' }}
+            />
+            <Route path="/analytics" element={<AnalyticsPage />} handle={{ breadcrumb: 'Analytics' }} />
             <Route element={<AdminRoute />}>
               <Route path="/admin/users" element={<AdminUsersPage />} handle={{ breadcrumb: 'Users' }} />
             </Route>

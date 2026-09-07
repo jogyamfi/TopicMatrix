@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Plus } from 'lucide-react';
+import { ArrowLeft, BookOpen, Plus, Rocket } from 'lucide-react';
 import { subjectTreeResponseSchema, topicResponseSchema, type TopicTreeNodeView } from '@topicmatrix/shared';
 import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
@@ -16,6 +16,7 @@ import { CreateTopicDialog } from './create-topic-dialog';
 import { DeleteTopicDialog } from './delete-topic-dialog';
 import { MoveTopicDialog } from './move-topic-dialog';
 import { LogSessionDialog } from '../topics/log-session-dialog';
+import { LaunchReviewDialog } from '../review/launch-review-dialog';
 
 function collapsedStorageKey(subjectId: string): string {
   return `topictree:collapsed:${subjectId}`;
@@ -64,6 +65,7 @@ export default function SubjectTreePage(): React.JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<TopicTreeNodeView | null>(null);
   const [moveTarget, setMoveTarget] = useState<TopicTreeNodeView | null>(null);
   const [logTarget, setLogTarget] = useState<TopicTreeNodeView | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const move = async (topicId: string, body: { parentId?: string | null; sortOrder?: number }) => {
     try {
@@ -118,9 +120,14 @@ export default function SubjectTreePage(): React.JSX.Element {
             ) : null}
           </div>
         </div>
-        <Button onClick={() => setCreateParentId(null)}>
-          <Plus /> Add topic
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setReviewOpen(true)}>
+            <Rocket /> Review this subject
+          </Button>
+          <Button onClick={() => setCreateParentId(null)}>
+            <Plus /> Add topic
+          </Button>
+        </div>
       </div>
 
       {treeQuery.isPending ? (
@@ -195,6 +202,11 @@ export default function SubjectTreePage(): React.JSX.Element {
       <LogSessionDialog
         topic={logTarget ? { id: logTarget.id, subjectId: id, name: logTarget.name } : null}
         onOpenChange={(open) => !open && setLogTarget(null)}
+      />
+      <LaunchReviewDialog
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        fixedScope={{ mode: 'subject', subjectId: id, label: treeQuery.data?.subject.name ?? 'this subject' }}
       />
     </div>
   );

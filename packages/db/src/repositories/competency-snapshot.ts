@@ -16,6 +16,8 @@ export interface CompetencySnapshotRepository {
     topicId: string,
     opts?: { from?: Date; to?: Date },
   ): Promise<CompetencySnapshot[]>;
+  /** Every snapshot across every subject the user owns (P9 Topic Health View's review trend). */
+  listAllForUser(userId: string): Promise<CompetencySnapshot[]>;
   create(userId: string, topicId: string, input: CreateCompetencySnapshotInput): Promise<CompetencySnapshot>;
 }
 
@@ -42,6 +44,11 @@ export function createCompetencySnapshotRepository(
         orderBy: { capturedOn: 'asc' },
       });
     },
+    listAllForUser: (userId) =>
+      client.competencySnapshot.findMany({
+        where: { topic: { subject: { userId } } },
+        orderBy: { capturedOn: 'asc' },
+      }),
     create: async (userId, topicId, input) => {
       await assertOwned(userId, topicId);
       return client.competencySnapshot.create({ data: { topicId, ...input } });

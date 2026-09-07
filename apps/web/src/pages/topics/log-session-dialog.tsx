@@ -35,6 +35,8 @@ function todayIsoDate(): string {
 interface Props {
   topic: { id: string; subjectId: string; name: string } | null;
   onOpenChange: (open: boolean) => void;
+  /** P8 launcher hook: called after a session is successfully logged, before the dialog closes. */
+  onLogged?: () => void;
 }
 
 /**
@@ -43,7 +45,7 @@ interface Props {
  * the computed grade is shown live with an override. Submitting the form (Enter) is the only
  * required interaction beyond filling in the two question counts and picking confidence.
  */
-export function LogSessionDialog({ topic, onOpenChange }: Props): React.JSX.Element {
+export function LogSessionDialog({ topic, onOpenChange, onLogged }: Props): React.JSX.Element {
   const [studiedOn, setStudiedOn] = useState(todayIsoDate());
   const [sourceLabel, setSourceLabel] = useState('');
   const [questionsAttempted, setQuestionsAttempted] = useState('');
@@ -104,6 +106,7 @@ export function LogSessionDialog({ topic, onOpenChange }: Props): React.JSX.Elem
     onSuccess: async () => {
       if (topic) await invalidations.afterSessionWrite(topic.subjectId, topic.id);
       toast({ title: 'Session logged' });
+      onLogged?.();
       onOpenChange(false);
     },
     onError: (err) => {

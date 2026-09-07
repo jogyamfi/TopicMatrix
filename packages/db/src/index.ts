@@ -14,6 +14,36 @@ export { computeSubjectTopicMetrics, computeTopicMetrics } from './topic-metrics
 export type { TopicScoreMetrics } from './topic-metrics.js';
 export { computeSubjectSummary } from './subject-summary.js';
 export type { SubjectSummary } from './subject-summary.js';
+export { computeReviewQueue, buildReviewSession } from './review-queue.js';
+export type {
+  ReviewQueueItem,
+  ReviewQueueBuckets,
+  ReviewSessionMode,
+  ReviewSessionFilters,
+  ReviewSessionCaps,
+} from './review-queue.js';
+export {
+  computeDashboardAnalytics,
+  computeMastery,
+  computeHeatmap,
+  computeTopicHealthView,
+  computeRetentionSeries,
+  computeAccuracyConfidenceSeries,
+} from './analytics.js';
+export type {
+  DashboardAnalytics,
+  DashboardTodaySummary,
+  ActivityCalendarDay,
+  MasteryTopic,
+  HeatmapStatus,
+  HeatmapTopic,
+  ReviewTrend,
+  TopicHealthRow,
+  RetentionEventPoint,
+  RetentionProjectionPoint,
+  RetentionSeries,
+  AccuracyConfidencePoint,
+} from './analytics.js';
 
 export type {
   PrismaClient,

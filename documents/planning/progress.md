@@ -1048,9 +1048,247 @@ P6's code-splitting convention).
 - `GET /topics/:id/schedule` and `computeSubjectSummary` are the two new provider-agnostic reads
   this phase added; P9's analytics screens and P8's queue are natural next consumers of similar
   small, targeted reads rather than growing the existing list/tree endpoints further.
+
+## P8 — Review Queue & Study Session Launcher
+
+**Status:** Complete. Verified via `npm run typecheck`, `npm run lint`, `npm test` (132 passed),
+`npm run test:integration` (95 passed, including 11 new review-route tests), `npm run test:cf` (5
+passed, Worker suite unaffected), and a production `npm run build -w apps/web` (each new page its
+own chunk).
+
+### What shipped
+
+- **Cross-subject bulk reads** (`packages/db/src/repositories/{topic,study-session,review-schedule}.ts`):
+  `listAllForUser(userId)` on each, added specifically so the queue/launcher don't do an N+1 scan
+  per subject — the piece the P7 handover note flagged as needed. `computeEligibleTopicItems`
+  (`packages/db/src/review-queue.ts`) is the single bulk-computation shared by both endpoints
+  below; it mirrors `topic-metrics.ts`'s per-subject loop but works across every subject at once
+  and skips the aggregate roll-up (the queue has no use for it).
+- **`GET /review/queue`** (FR-7.1) — `computeReviewQueue` buckets eligible topics into
+  Overdue / Due today / Due in the next 7 days, sorted overdue-days-descending then
+  competency-ascending. A topic is eligible if it has a `ReviewSchedule` row (see below) and
+  neither the topic nor its schedule is suspended, and its subject isn't archived.
+- **`POST /review/start`** (FR-6.1, FR-6.2, FR-6.4) — `buildReviewSession` builds an ordered,
+  capped list for the launcher. Primary scope is one of `subject` / `topicSubtree` / `dueToday` /
+  `weakest`; secondary filters (`tagId`, `healthStatus`, `notReviewedInDays`, `minScore`,
+  `maxScore`) narrow any of them further. Caps: `maxItems` slices the list; `targetMinutes`
+  greedily keeps items while the running total (estimated from the user's own average logged
+  `durationMinutes`, defaulting to 5 min/item with no history) stays under the target, always
+  keeping at least one item.
+- **Decision — a schedule-existence gate, not a "has sessions" gate**: eligibility for both
+  endpoints is "has a `ReviewSchedule` row", not "has ever been studied". These aren't always the
+  same thing — FR-5.6/FR-5.10 let a next-review date or suspended flag be set directly on a
+  never-studied topic (confirmed against `applyScheduleOverride`'s "creates a schedule row if the
+  topic has never had one" behaviour), so such a topic can appear in the queue with a `null`
+  score. A topic with genuinely no schedule at all (never studied, never overridden) has nothing
+  to review yet and is correctly excluded. Weakest-first sorting treats a `null` score as lowest
+  priority (sorts last), not as "weakest" — an unknown topic isn't necessarily weak.
+- **`accuracyTrend` computed server-side**, from the two most recent sessions' accuracy (not the
+  `CompetencySnapshot` history P9 owns) — avoids the launcher needing a second per-item fetch to
+  satisfy FR-6.3's "last score, accuracy trend, next-due date" for the item currently on screen.
+- **Review Queue UI** (`pages/review/review-queue-section.tsx`) — shared by the dashboard
+  (`compact`, capped to 5 items with a "View all N due" link) and the standalone `/review` page
+  (`review-queue-page.tsx`, full buckets). Per-item quick actions: **Log** (reuses P7's
+  `LogSessionDialog` unmodified except for one addition below), **Snooze** (inline `Select`,
+  1/3/7 days, calls the existing `POST /topics/:id/schedule/override`), **Suspend** (same
+  endpoint). No new backend needed for either quick action — both were already built in P5.
+- **Launcher** (`pages/review/launcher-page.tsx` at `/review/launch`) — one topic at a time:
+  name, subject, notes, health status, last score, accuracy trend, next-due date, a progress bar,
+  and Log / Skip / Snooze actions. **Resumable progress (FR-6.5)** is client-side-only
+  (`lib/launcher-store.ts`, `localStorage` key `topicmatrix:launcher-run`): the ordered item list
+  *and* current index are persisted on every advance, so a refresh reads the same run back rather
+  than re-querying `/review/start` (which could return a different order/set once anything has
+  changed) — satisfies NF-15's "no server-side in-process state" by construction, per the plan's
+  own explicit allowance for client-side persistence here.
+- **Launch configuration dialog** (`launch-review-dialog.tsx`) — mode picker (due today /
+  weakest / a specific subject) plus the secondary filters and caps, reachable from `/review`'s
+  "Start review session" button. Two more entry points reuse the same dialog with a **fixed**
+  scope (mode pre-set, no picker shown): "Review this subject" (subject tree page header) and
+  "Review this topic" (topic detail page header, `topicSubtree` mode — topic + descendants).
+- **One small, justified change to `LogSessionDialog`**: an optional `onLogged` callback, invoked
+  on successful save before the dialog closes. Every existing caller (topic tree row, topic
+  detail page) is unaffected (prop omitted); the launcher uses it to advance to the next item.
+- Nav: added a "Review" sidebar/mobile-nav link (`components/layout/nav-items.ts`) and a new
+  `queryKeys.review.queue()` key, invalidated by `invalidations.afterSessionWrite` (a session
+  write can move a topic in or out of the queue) and directly by the queue's own quick actions.
+
+### Deferred / not in scope for P8
+
+- **FR-5.11 (daily maximum with lowest-priority deferral)** — the plan explicitly lists this as
+  Could-have with permission to defer; not built. There's no per-user "daily maximum reviewed"
+  setting in the schema yet either. Revisit at P8-follow-up or P10 (settings) if wanted.
+- **A generic topic picker for `topicSubtree` mode in the launch dialog** — the dialog's own mode
+  picker only offers due-today/weakest/subject; `topicSubtree` is only reachable via the fixed-
+  scope entry point on the topic detail page (there's no topic search/autocomplete endpoint to
+  build a generic picker against). Functionally complete (FR-6.1 is satisfied), just not
+  reachable from every possible starting point.
+- **Launcher item data is a point-in-time snapshot from `POST /review/start`**, not re-fetched
+  live per item — deliberate (keeps the launcher simple and resumable without a network
+  dependency), but means a score/trend shown mid-run won't reflect a session logged for that same
+  topic through some other tab in the meantime. Edge case, not expected to matter in practice.
+- Tree/list virtualisation, PostgreSQL/D1 runtime verification: unchanged from P7's own deferred
+  list — this phase didn't touch either area.
+
+### Decisions taken
+
+- **Eligibility = "has a `ReviewSchedule` row"**, not "has sessions" — see above. Documented here
+  because it's easy to assume the two are equivalent (P5's FR-5.1 comment about lazy creation on
+  first session reads that way) when FR-5.6/FR-5.10 are a second, independent path to the same
+  row.
+- **`buildReviewSession`'s `targetMinutes` cap estimates per-item time from the user's own
+  historical average `durationMinutes`** (falling back to a flat 5 minutes with no history)
+  rather than trying to predict per-topic review time — there's no other signal available, and
+  getting this exactly right isn't what FR-6.4 (a Should-have) is testing for.
+- **Client-side-only resumable launcher state** (`localStorage`, no server persistence) — the
+  plan explicitly allows this for FR-6.5, and it sidesteps NF-15 entirely rather than needing a
+  new "in-progress session" server concept just for a refresh to survive.
+
+### Handover to P9+
+
+- `packages/db/src/review-queue.ts`'s `computeEligibleTopicItems` (own score, health, schedule,
+  accuracy trend, per topic, in one bulk pass) is now the second cross-subject bulk-read pattern
+  after `topic-metrics.ts`'s per-subject one — P9's Topic Health View / heatmap need a very
+  similar per-topic-across-all-subjects computation and should extend or reuse this rather than
+  writing a third variant.
+- The accuracy-trend calculation here (comparing the two most recent sessions' raw accuracy) is
+  deliberately simpler than what P9's "review trend ▲▼▬" (FR-7.6, from the last two competency
+  *snapshots*) needs — don't conflate the two; they answer different questions from different
+  data sources.
+- `queryKeys.review.queue()` / `invalidations.afterSessionWrite` now also cover the review queue —
+  any future mutation that can change a topic's due date or suspension state should invalidate it
+  too, the same way session writes and the queue's own quick actions already do.
 - If P9 needs virtualisation for large lists (Topic Health View, FR-7.6, is likely to have more
   rows than a topic tree), evaluate a virtualisation library then rather than retrofitting it
   into the P7 tree — the corporate-proxy install risk noted above applies equally there.
+
+## P9 — Dashboard & Analytics
+
+**Status:** Complete. Verified via `npm run typecheck`, `npm run lint`, `npm test` (140 passed,
+including 8 new `computeStreak` unit tests), `npm run test:integration` (108 passed, including 13
+new analytics-route tests), and a production `npm run build -w apps/web` (the analytics page is
+its own lazy-loaded chunk).
+
+### What shipped
+
+- **`computeStreak`** (`packages/core/src/streak.ts`) — a pure consecutive-user-day counter.
+  Deliberately takes already-resolved UTC-midnight "user-day" `Date`s and does whole-day
+  millisecond arithmetic only; all timezone/day-start-hour resolution stays one layer up in
+  `startOfUserDay` (`packages/shared`), same division of responsibility as `date-utils.ts`. Not
+  breaking the current streak when *today* has no session yet (only when a whole day is skipped)
+  matches FR-7.3's "consecutive days" reading.
+- **`packages/db/src/analytics.ts`** — one new module, six functions, one per `/analytics/*`
+  route:
+  - `computeDashboardAnalytics` (FR-7.2, FR-7.3): today's summary (topics reviewed, questions
+    attempted, accuracy, minutes) grouped by `StudySession.studiedOn` directly (it already
+    encodes the correct user-day bucket at write time, per FR-5.9 — no further timezone math
+    needed there), plus `computeStreak` and a 365-day activity calendar.
+  - `computeMastery` (FR-7.4) and `computeHeatmap` (FR-7.5) both compute **own** (not aggregate)
+    competency score per topic in one subject, in two bulk queries — the same shape as
+    `topic-metrics.ts`'s per-topic loop, kept as a separate, self-contained implementation here
+    (not a refactor of `topic-metrics.ts`) to avoid touching that already-tested code path.
+    `computeHeatmap` additionally classifies each topic as `neverStarted` / `neglected` / `scored`
+    — a distinction the shared `HealthStatus` enum can't express (`neglected` and a merely low
+    score both collapse into `atRisk` there), which is exactly what FR-7.5 requires be visually
+    distinct.
+  - `computeTopicHealthView` (FR-7.6) — cross-subject, the same bulk-read shape as
+    `review-queue.ts`'s `computeEligibleTopicItems` (per the P8 handover note), but WITHOUT that
+    function's "has an active schedule" filter, since the Health View must also list
+    never-studied topics. `reviewTrend` (▲▼▬) comes from the topic's last two `CompetencySnapshot`
+    rows — a new `CompetencySnapshotRepository.listAllForUser` bulk method was added (same pattern
+    as the three P8 `listAllForUser` additions) so this doesn't N+1 per topic.
+  - `computeRetentionSeries` (FR-7.7) — `events` are actual `CompetencySnapshot` points; the
+    dashed `projection` between them holds each snapshot's stored `accuracyComponent`/
+    `confidenceComponent` constant and re-decays only the recency term
+    (`exp(-Δt / intervalApprox)`, same shape as `computeCompetencyScore`), sampled at a step that
+    caps the series at ~400 points regardless of range. **Documented approximation**: since the
+    exact scheduling interval in effect *at the time of each historical review* isn't
+    reconstructable from stored data, the gap between two consecutive snapshots' `capturedOn`
+    stands in for it. Supports a single topic directly, or (also documented as an approximation)
+    a whole subject via an unweighted mean of every topic's projected value at each shared sample
+    date — a simplification of §7.3's activity-weighted roll-up, which would need per-date
+    weights this endpoint has no cheap way to reconstruct.
+  - `computeAccuracyConfidenceSeries` (FR-7.8) — one point per session (not per day), sorted
+    oldest-first, for a topic or a whole subject, with confidence pre-normalised to the same
+    0..1 scale as accuracy for a shared axis.
+- **Routes** (`packages/api-core/src/routes/analytics.ts`): `GET /analytics/dashboard`,
+  `/mastery`, `/heatmap`, `/health`, `/retention`, `/accuracy-confidence`. `/retention` and
+  `/accuracy-confidence` take exactly one of `topicId`/`subjectId` (400 if both or neither);
+  every route verifies ownership of any `topicId`/`subjectId` query param up front (404, not a
+  silently-empty 200) before calling into `packages/db`.
+- **Shared schemas** (`packages/shared/src/analytics.ts`) — one response schema (plus item-level
+  schemas/types, e.g. `MasteryTopic`, `HeatmapTopic`) per route, mirroring the `packages/db`
+  return types exactly, same convention as every prior phase's `packages/shared` module.
+- **Frontend** (`apps/web`): `recharts` added as a new dependency (pure JS, no native binaries —
+  installed cleanly despite this machine's corporate-proxy binary-download blocking noted
+  earlier in this file). New `/analytics` route and nav link, with a subject selector + tabs
+  (Health view / Mastery / Heatmap / Retention / Accuracy vs confidence) in
+  `pages/analytics/analytics-page.tsx`. Every chart (`components/charts/*`) is wrapped in
+  `ChartWithDataTable`, a `<details>` disclosure exposing the same data as an HTML table (NF-4).
+  The topic heatmap grid pairs colour with an icon + text label for `neverStarted`/`neglected`
+  cells rather than relying on colour alone (NF-4). The Topic Health View
+  (`pages/analytics/topic-health-table.tsx`) is sortable on every column (click a header) and
+  filterable by a name/subject text box plus a health-status dropdown. The dashboard
+  (`dashboard-page.tsx`) now also shows today's summary cards, streak, and a GitHub-style
+  365-day activity calendar (`components/activity-calendar.tsx`, plain CSS grid, not Recharts).
+  `queryKeys.analytics.*` added; `invalidations.afterSessionWrite` now also invalidates the whole
+  `['analytics']` query-key prefix, since a session write can change every P9 view at once and
+  none of them has a narrower key worth targeting individually.
+- **NF-1 performance**: not separately load-tested against the plan's 20-subject/2,000-topic/
+  20,000-session target in this phase — every new query follows the same "N bulk reads via
+  `Promise.all`, then in-memory grouping" shape already used (and implicitly exercised) by
+  `review-queue.ts`/`topic-metrics.ts`, but no dedicated large-dataset seed/measurement was run.
+  Flagged for follow-up rather than guessed at.
+
+### Deferred / not in scope for P9
+
+- **NF-1's explicit large-dataset measurement** (20 subjects / 2,000 topics / 20,000 sessions,
+  numbers recorded) — see above; not run this phase.
+- **A generic topic picker across subjects** for Retention/Accuracy-vs-confidence's "whole
+  subject vs one topic" selector — the dropdown only lists topics within the currently-selected
+  subject (via `GET /topics?subjectId=`), same reachability limit the P8 handover noted for the
+  launch dialog's `topicSubtree` mode; there's still no topic search/autocomplete endpoint.
+  Functionally complete for FR-7.7/FR-7.8, just not reachable from every conceivable path.
+  (Adding `queryKeys.topics.listBySubject` for this reuses, rather than duplicates, the existing
+  `/topics?subjectId=` list endpoint.)
+- **Subject-level retention curve accuracy** — see the documented approximation above; correct
+  for a single topic, illustrative (not exact) for a whole subject.
+- Tree/list virtualisation for the Topic Health View — the P8 handover flagged this as worth
+  evaluating once P9's larger lists existed; not added, since no seeded dataset in this phase was
+  large enough to demonstrate a real need.
+
+### Decisions taken
+
+- **`computeMastery`/`computeHeatmap` are self-contained, not a refactor of
+  `topic-metrics.ts`** — accepted the small duplication (each re-implements the same
+  per-topic `computeCompetencyScore` loop) rather than extracting a shared helper, to avoid any
+  risk of changing behaviour under `topic-metrics.ts`'s existing (already-relied-upon) tests.
+- **Topic Health View has no "has an active schedule" eligibility filter**, unlike the P8 review
+  queue's `computeEligibleTopicItems` — a deliberate divergence: FR-7.6 explicitly wants
+  never-studied topics visible (`healthStatus: 'notStarted'`), where the queue explicitly wants
+  them excluded (nothing to review yet).
+- **Decay projection holds `accuracyComponent`/`confidenceComponent` constant between reviews and
+  only re-decays the recency term** — matches §7.1's own model (those two components only change
+  when a new session is logged), and reuses the exact stored values rather than re-deriving them,
+  at the cost of approximating the historical scheduling interval (see above).
+- **Retention/accuracy-confidence charts are Recharts `ComposedChart`/`LineChart`s with a
+  `<details>` data-table fallback**, rather than a custom SVG chart — keeps the implementation
+  small and leans on `recharts`'s built-in `ResponsiveContainer`/`Tooltip`, at the cost of a
+  larger JS bundle for that one lazy-loaded route (~440 kB uncompressed, ~119 kB gzipped) — this
+  is a `apps/web` browser bundle, not the Workers script NF-14 actually constrains, so accepted
+  without further optimisation.
+
+### Handover to P10+
+
+- `queryKeys.topics.listBySubject(subjectId)` is a new, general-purpose key (backed by the
+  existing `GET /topics?subjectId=` endpoint) — reuse it rather than adding a fourth topic-list
+  query key if another P10 screen needs the same data.
+- The `['analytics']` broad-prefix invalidation in `afterSessionWrite` is intentionally coarse;
+  if a future P10 settings change (e.g. editing scoring weights/thresholds) should also refresh
+  every analytics view, invalidate the same prefix from wherever that settings mutation lives.
+- NF-1's large-dataset performance measurement (20/2,000/20,000) is still outstanding — P10's own
+  NF-1-adjacent acceptance criteria (if any) or a dedicated perf pass should pick this up using
+  `npm run seed:demo`-style data generation at that scale.
+
 
 
 

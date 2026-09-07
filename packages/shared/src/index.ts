@@ -155,3 +155,44 @@ export type {
   ScheduleOverrideResponse,
   ScheduleResponse,
 } from './schedule.js';
+export {
+  reviewQueueItemSchema,
+  reviewQueueResponseSchema,
+  reviewStartRequestSchema,
+  reviewStartResponseSchema,
+} from './review.js';
+export type {
+  ReviewQueueItem,
+  ReviewQueueResponse,
+  ReviewStartRequest,
+  ReviewStartResponse,
+} from './review.js';
+export {
+  dashboardTodaySummarySchema,
+  activityCalendarDaySchema,
+  dashboardAnalyticsResponseSchema,
+  masteryTopicSchema,
+  masteryResponseSchema,
+  heatmapStatusSchema,
+  heatmapTopicSchema,
+  heatmapResponseSchema,
+  reviewTrendSchema,
+  topicHealthRowSchema,
+  topicHealthResponseSchema,
+  retentionEventPointSchema,
+  retentionProjectionPointSchema,
+  retentionResponseSchema,
+  accuracyConfidencePointSchema,
+  accuracyConfidenceResponseSchema,
+} from './analytics.js';
+export type {
+  DashboardAnalyticsResponse,
+  ActivityCalendarDay,
+  MasteryTopic,
+  MasteryResponse,
+  HeatmapTopic,
+  HeatmapResponse,
+  TopicHealthResponse,
+  RetentionResponse,
+  AccuracyConfidenceResponse,
+} from './analytics.js';

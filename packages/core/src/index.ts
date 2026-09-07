@@ -5,4 +5,5 @@ export * from './date-utils.js';
 export * from './grade.js';
 export * from './scoring.js';
 export * from './replay.js';
+export * from './streak.js';
 export * from './schedulers/registry.js';

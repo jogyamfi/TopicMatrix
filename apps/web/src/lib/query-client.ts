@@ -22,6 +22,7 @@ export const queryKeys = {
     tree: (subjectId: string) => ['subjects', subjectId, 'tree'] as const,
   },
   topics: {
+    listBySubject: (subjectId: string) => ['topics', 'list', subjectId] as const,
     detail: (topicId: string) => ['topics', topicId] as const,
     tags: (topicId: string) => ['topics', topicId, 'tags'] as const,
   },
@@ -32,5 +33,18 @@ export const queryKeys = {
   tags: {
     list: () => ['tags'] as const,
     topics: (tagId: string) => ['tags', tagId, 'topics'] as const,
+  },
+  review: {
+    queue: () => ['review', 'queue'] as const,
+  },
+  analytics: {
+    dashboard: () => ['analytics', 'dashboard'] as const,
+    mastery: (subjectId: string) => ['analytics', 'mastery', subjectId] as const,
+    heatmap: (subjectId: string) => ['analytics', 'heatmap', subjectId] as const,
+    health: (subjectId?: string) => ['analytics', 'health', subjectId ?? 'all'] as const,
+    retention: (target: { topicId: string } | { subjectId: string }, from?: string, to?: string) =>
+      ['analytics', 'retention', target, from ?? null, to ?? null] as const,
+    accuracyConfidence: (target: { topicId: string } | { subjectId: string }, from?: string, to?: string) =>
+      ['analytics', 'accuracy-confidence', target, from ?? null, to ?? null] as const,
   },
 };

@@ -23,12 +23,18 @@ export const invalidations = {
 
   // A session write recomputes the topic's own score AND every ancestor's aggregate roll-up, so
   // (like topic writes) it invalidates the whole subject tree rather than just the one topic.
+  // It can also move the topic in or out of the review queue (P8), so that's invalidated too.
+  // It also changes every P9 analytics view derived from sessions/snapshots (dashboard summary,
+  // streak, mastery, heatmap, health view, retention, accuracy/confidence) — those don't have a
+  // narrower key to target than "everything under 'analytics'", so invalidate the whole prefix.
   afterSessionWrite: (subjectId: string, topicId: string) =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.subjects.tree(subjectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.subjects.list() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list(topicId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions.history(topicId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() }),
+      queryClient.invalidateQueries({ queryKey: ['analytics'] }),
     ]),
 
   afterTagWrite: () => queryClient.invalidateQueries({ queryKey: queryKeys.tags.list() }),

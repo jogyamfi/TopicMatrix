@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ListChecks, Pause, Play, Plus, X } from 'lucide-react';
+import { ArrowLeft, ListChecks, Pause, Play, Plus, Rocket, X } from 'lucide-react';
 import {
   createTagRequestSchema,
   historyResponseSchema,
@@ -38,6 +38,7 @@ import { LogSessionDialog } from './log-session-dialog';
 import { EditSessionDialog } from './edit-session-dialog';
 import { DeleteSessionDialog } from './delete-session-dialog';
 import { SessionHistoryTable } from './session-history-table';
+import { LaunchReviewDialog } from '../review/launch-review-dialog';
 
 function ScoreCard({ title, score, health }: { title: string; score: number | null; health: string | null }): React.JSX.Element {
   return (
@@ -182,6 +183,7 @@ export default function TopicDetailPage(): React.JSX.Element {
 
   const [editOpen, setEditOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [editSession, setEditSession] = useState<StudySessionView | null>(null);
   const [deleteSession, setDeleteSession] = useState<StudySessionView | null>(null);
 
@@ -228,6 +230,9 @@ export default function TopicDetailPage(): React.JSX.Element {
         <div className="flex gap-2">
           <Button onClick={() => setLogOpen(true)}>
             <ListChecks /> Log session
+          </Button>
+          <Button variant="outline" onClick={() => setReviewOpen(true)}>
+            <Rocket /> Review this topic
           </Button>
           <Button variant="outline" onClick={() => setEditOpen(true)}>
             Edit
@@ -300,6 +305,11 @@ export default function TopicDetailPage(): React.JSX.Element {
         session={deleteSession}
         subjectId={topic.subjectId}
         onOpenChange={(open) => !open && setDeleteSession(null)}
+      />
+      <LaunchReviewDialog
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        fixedScope={{ mode: 'topicSubtree', topicId: topic.id, label: `${topic.name} and its subtopics` }}
       />
     </div>
   );
