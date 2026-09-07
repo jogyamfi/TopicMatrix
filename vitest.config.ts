@@ -7,7 +7,8 @@ export default defineConfig({
     // *.cf.test.ts files require workerd (via @cloudflare/vitest-pool-workers, NF-11a) and
     // only run under `npm run test:cf` — see vitest.workers.config.ts. *.integration.test.ts
     // files need a real (migrated) database and only run under `npm run test:integration[:pg]`
-    // — see vitest.integration.config.ts.
+    // — see vitest.integration.config.ts. The coverage gate (NF-6) runs both suites together —
+    // see vitest.coverage.config.ts / `npm run test:coverage`.
     exclude: [
       '**/node_modules/**',
       '**/dist/**',

@@ -35,7 +35,9 @@ async function main(): Promise<void> {
       memoryKib: config.argon2MemoryKib,
       iterations: config.argon2Iterations,
     });
-    const temporaryPassword = randomOpaqueToken(9);
+    // Override for the Playwright E2E suite only (P10) — it needs a KNOWN password to log in
+    // with; every other caller gets the usual random one-time value.
+    const temporaryPassword = process.env.SEED_ADMIN_PASSWORD ?? randomOpaqueToken(9);
     const passwordHash = await passwordService.hash(temporaryPassword);
 
     const admin = await db.users.create({

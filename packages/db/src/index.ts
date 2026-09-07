@@ -44,6 +44,14 @@ export type {
   RetentionSeries,
   AccuracyConfidencePoint,
 } from './analytics.js';
+export { buildUserExportStream, buildSessionsCsv, sanitiseCsvCell, EXPORT_FORMAT_VERSION } from './export.js';
+export type { SessionsCsvFilter } from './export.js';
+export { computeSettingsPreview } from './settings-preview.js';
+export type {
+  SettingsPreviewWeightsAndThresholds,
+  SettingsPreviewSide,
+  SettingsPreviewResult,
+} from './settings-preview.js';
 
 export type {
   PrismaClient,
@@ -87,7 +95,7 @@ export type {
   CompetencySnapshotRepository,
   CreateCompetencySnapshotInput,
 } from './repositories/competency-snapshot.js';
-export type { TagRepository } from './repositories/tag.js';
+export type { TagRepository, TopicTagLink } from './repositories/tag.js';
 export type {
   RefreshTokenRepository,
   CreateRefreshTokenInput,

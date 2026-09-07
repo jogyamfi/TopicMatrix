@@ -16,8 +16,12 @@ export type UpdateTopicInput = Partial<
 
 export interface TopicRepository {
   listBySubject(userId: string, subjectId: string): Promise<Topic[]>;
-  /** Every topic across every subject the user owns (P8 review queue) — avoids an N+1 per-subject scan. */
-  listAllForUser(userId: string): Promise<Topic[]>;
+  /**
+   * Every topic across every subject the user owns (P8 review queue) — avoids an N+1
+   * per-subject scan. `skip`/`take` (P10 export) page through results instead of one
+   * unbounded query.
+   */
+  listAllForUser(userId: string, opts?: { skip?: number; take?: number }): Promise<Topic[]>;
   findById(userId: string, topicId: string): Promise<Topic | null>;
   /**
    * Creates a topic and computes its materialised `path`/`depth` from its parent (or as a new
@@ -44,10 +48,12 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
         where: { subjectId, subject: { userId } },
         orderBy: { sortOrder: 'asc' },
       }),
-    listAllForUser: (userId) =>
+    listAllForUser: (userId, opts) =>
       client.topic.findMany({
         where: { subject: { userId } },
         orderBy: { sortOrder: 'asc' },
+        ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
+        ...(opts?.take !== undefined ? { take: opts.take } : {}),
       }),
     findById: (userId, topicId) =>
       client.topic.findFirst({ where: { id: topicId, subject: { userId } } }),

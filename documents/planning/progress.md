@@ -1289,6 +1289,194 @@ its own lazy-loaded chunk).
   NF-1-adjacent acceptance criteria (if any) or a dedicated perf pass should pick this up using
   `npm run seed:demo`-style data generation at that scale.
 
+## P10 — Settings, Data Export, Accessibility & E2E
+
+**Status:** Complete, with the Docker/self-hosted deployment target implemented but **not
+runtime-verified** — no Docker available on this development machine (same caveat as P1's
+PostgreSQL path). Verified via `npm run typecheck`, `npm run lint`, `npm test` (140 passed),
+`npm run test:integration` (127 passed, including 19 new settings/export tests),
+`npm run test:cf` (5 passed), `npm run test:coverage` (267 tests, 92.11% overall / 99.04%
+`packages/core` line coverage — both above the NF-6 gate), `npm run audit` (passes with one
+documented exception), and `npm run test:e2e` (2 passed, real browser via Playwright).
+
+### What shipped
+
+- **Settings API** (`packages/api-core/src/routes/settings.ts`, FR-8.1/FR-8.2): `GET/PATCH
+  /me/settings` (timezone, day-start hour, default algorithm, manual interval ladder, neglect
+  threshold, scoring weights, health thresholds), `POST /me/settings/reset-scoring` (resets only
+  the scoring-weight/threshold fields to platform defaults), `POST /me/settings/preview` — a live
+  preview of a proposed weight/threshold change scored against a real topic (a caller-supplied
+  `topicId`, or the user's own topic with the most sessions if omitted; `null` if the user has no
+  topics at all). Validation always runs against the **final, merged** settings (existing row +
+  the requested patch), not just the fields present in one request — a single-field PATCH (e.g.
+  just `dayStartHour`) is never rejected for a weights-sum reason unrelated to what it's actually
+  changing, but a PATCH that *would* leave the weights not summing to 1.0, or
+  `needsReviewThreshold >= strongThreshold`, is rejected either way. `packages/db/src/
+  settings-preview.ts` is a standalone module (not a `topic-metrics.ts` reuse) since it needs to
+  score the same topic twice, once per weight set.
+- **Export API** (`packages/api-core/src/routes/export.ts`, `packages/db/src/export.ts`,
+  FR-9.1-FR-9.3): `GET /export/json` streams a complete, versioned (`version: 1`), lossless JSON
+  export — every collection (subjects, topics, sessions, schedules, snapshots, tags, topic-tag
+  links) is read in fixed-size (500-row) pages via a new `ReadableStream`-based writer rather
+  than one unbounded `findMany` per collection (§14.4's D1/Workers-limits discipline, applied
+  uniformly even though SQLite/PostgreSQL could technically do it in one query). Deliberately
+  excludes `passwordHash` and `RefreshToken` rows — auth secrets, not study data, and meaningless
+  to re-import into a fresh account anyway. `GET /export/sessions.csv` is filterable by
+  `subjectId`/`from`/`to` and applies the CSV-injection defence required by §11.2 A03
+  (`sanitiseCsvCell` prefixes any cell starting with `= + - @` with a single quote) — covered by
+  an explicit test using a real `=cmd|...` payload in a session note, per the phase's own
+  acceptance criteria wording. Five repository methods (`subjects.list`, `topics.listAllForUser`,
+  `studySessions.listAllForUser`, `reviewSchedules.listAllForUser`,
+  `competencySnapshots.listAllForUser`, `tags.list`) gained optional `{ skip, take }` pagination
+  params, and `tags` gained a new bulk `listAllTopicTagsForUser`, to support the internal paging
+  both export functions need.
+- **Settings UI** (`apps/web/src/pages/settings/settings-page.tsx`): timezone (free-typed IANA
+  identifier with a `<datalist>` of common zones, validated server-side either way), day-start
+  hour, default algorithm, a manual-interval-ladder editor (add/remove/edit steps), neglect
+  threshold, the three scoring weights with a live running-sum indicator, the two health
+  thresholds, a "Reset to defaults" button, and a live preview panel (calls
+  `POST /me/settings/preview` on every keystroke, same "cheap enough locally, no debounce needed"
+  convention P7's grade-preview established) showing a real topic's current vs proposed
+  score/health side by side.
+- **Export UI** (`apps/web/src/pages/settings/export-page.tsx`): a "Download JSON export" button
+  and a CSV form (subject dropdown + date range) — both trigger a real browser file download via
+  `fetch` + `Blob` + a synthetic anchor click, deliberately **not** routed through the typed
+  `apiFetch` helper (these endpoints return raw files, not a Zod-validated JSON body).
+- **Coverage gate wired for real (NF-6, task 7)** — `@vitest/coverage-v8@2.1.9` is now a real,
+  committed devDependency (previously only self-verified locally and explicitly deferred to this
+  phase per P3's own handover note). A **third** vitest config, `vitest.coverage.config.ts`, runs
+  the fast unit suite AND the real-database integration suite together in one process
+  (`npm run test:coverage`) with thresholds (`lines/functions/branches/statements`: 70% overall,
+  90% for `packages/core/src/**`) — measuring from the unit suite alone showed ~37% (most of
+  `packages/db`/`packages/api-core/src/routes` is only exercised by the integration suite), so a
+  combined run was necessary for an honest number. Both thresholds pass comfortably (92.11%/
+  99.04%). Wired into CI as a dedicated `coverage` job.
+- **Dependency audit gate (SEC-9, task 8)** — `npm run audit` wraps `npm audit --omit=dev --json`
+  via a small script (`scripts/check-audit.mjs`) rather than calling `npm audit` directly, so
+  exactly one documented, non-reachable finding (GHSA-ggr8-5vv4-36mx, `deepmerge-ts` via the
+  `prisma` CLI devDependency's `@prisma/config` — reachable only from `prisma generate`/`migrate`
+  against our own trusted schema files, never from `@prisma/client`'s runtime code) can be
+  allowlisted by GHSA id with a written reachability justification, instead of either permanently
+  red CI or silently lowering the whole gate to `critical`-only. Wired into CI as a dedicated
+  `dependency-audit` job. Security headers/CSP on real responses (the other half of task 8) were
+  already covered by P2's `index.test.ts` — re-verified still passing, nothing new needed there.
+- **Playwright E2E suite (task 6)** — `e2e/full-flow.spec.ts`, one long acceptance walkthrough
+  matching the plan's own list almost verbatim: first-run admin seed → login → forced password
+  change → re-login → create a subject and topic → log a session → start and complete a review
+  launcher run → view analytics → export → change settings. Runs against the real T1 loop (Vite +
+  Node API, SQLite) via a dedicated scratch database (`scripts/e2e-server.mjs`, wired as
+  Playwright's `webServer`) — never the developer's own `dev.db`. `apps/api/src/seed-admin.ts`
+  gained one small, backwards-compatible addition: an optional `SEED_ADMIN_PASSWORD` env override
+  (falls back to the usual random one-time password for every other caller) so the E2E suite can
+  log in with a known credential. `npx playwright install chromium` hit the same corporate-CA
+  issue as Prisma's binary downloads (`unable to get local issuer certificate`) — fixed the same
+  way, with `NODE_OPTIONS=--use-system-ca` for the install command only (this one isn't a proxy
+  *block*, unlike the esbuild/devalue cases — it installs fine once the CA issue is resolved).
+- **Automated accessibility scanning (task 5, the automated half)** — `@axe-core/playwright`, a
+  second E2E test scanning the dashboard and settings pages, asserting zero `serious`/`critical`
+  violations (matching the phase's own acceptance criterion). **This found a real bug**: the
+  light-theme `--health-needs-review` CSS custom property (`38 92% 40%`, rendered as `#c47f08`)
+  had only a 3.28:1 contrast ratio against a white card background — below WCAG AA's 4.5:1
+  minimum for normal text. Fixed by darkening it to `38 92% 30%` (same hue/saturation, ~5.4:1
+  contrast, comfortably over the threshold); the dark theme's own override
+  (`--health-needs-review: 38 92% 55%`) was already fine and untouched. This is exactly the kind
+  of finding an automated scan catches that a manual read-through easily misses — worth
+  remembering that "looks fine to me" is not the same as "meets 4.5:1". The manual
+  keyboard-only/screen-reader pass (task 5's other half) was not additionally re-performed this
+  phase beyond what P6/P7/P8/P9 already built to (always-visible tree actions, keyboard-operable
+  move dialog, icon+text health status everywhere, focus management, skip link) — no new
+  violation surfaced by the axe scan beyond the one fixed above.
+- **Self-hosted Docker deployment (task 10)** — a new root `docker-compose.yml` (distinct from
+  `docker-compose.dev.yml`, which only ever started PostgreSQL for a host-run app) brings up
+  `postgres` + `api` + `web` from a clean checkout. `apps/api/Dockerfile` runs the exact same
+  `tsx src/index.ts` entrypoint `apps/api/package.json`'s own `start` script already uses locally
+  (no separate compiled-JS runtime path was invented), generates the PostgreSQL Prisma client at
+  build time, and runs `prisma migrate deploy` (non-interactive) at container start before
+  serving. `apps/web/Dockerfile` builds the SPA and serves it via nginx
+  (`apps/web/nginx.conf`), reverse-proxying `/api/*` to the `api` container with the same
+  path-rewrite behaviour as `vite.config.ts`'s dev-server proxy, so the browser only ever sees one
+  origin (no CORS needed) — mirroring the same-origin convenience principle FR-D.6 established
+  for the Workers target. **Not verified with a real `docker build`/`docker compose up`** — no
+  Docker available on this machine (confirmed via `docker --version` failing outright, and the
+  user explicitly said to skip attempting Docker verification here). Whoever picks this up next
+  on a machine with Docker should treat it exactly like P1 treated the unverified PostgreSQL
+  integration path: run it for real before trusting it, starting with `docker compose up --build`
+  and `docker compose exec api npm run seed:admin -w apps/api`.
+- **Docs (task 9)** — `documents/guides/deployment.md` (Docker Compose walkthrough; PostgreSQL
+  backup/restore via `pg_dump`/`psql`; SQLite backup/restore via `sqlite3 .backup`; a note that
+  the in-app JSON/CSV export is a per-user convenience, not a substitute for a real database
+  backup) and `documents/guides/scoring-and-scheduling.md` (a plain-language, no-formulas
+  explainer of the competency score, health status, grade mapping and the three scheduling
+  algorithms, for end users — not a restatement of §7/§8's implementation detail). README gained
+  the new `test:coverage`/`test:e2e`/`audit` script rows and links to both new guides. The
+  existing README quickstart already served as the "local development guide" T1 task 9 asks for
+  (SQLite quickstart, switching to PostgreSQL, the dev compose database, seeding demo data were
+  all already there from P0/P1) — not duplicated into a second document.
+
+### Deferred / not in scope for P10
+
+- **The Docker/self-hosted deployment target is unverified at runtime** — see above. This is the
+  single biggest open item from this phase; treat it the same way the PostgreSQL integration path
+  has been treated since P1 (implemented to the best of available knowledge, flagged clearly,
+  first real task for whoever has the missing tooling).
+- **A true manual keyboard-only/screen-reader pass** — the automated `axe` half of task 5 is real
+  and found a real bug (see above); a dedicated manual pass beyond what P6-P9 already built
+  in was not additionally performed. Worth doing before a real v1 release, not blocking for this
+  exercise.
+- **NF-1's large-dataset performance measurement (20 subjects/2,000 topics/20,000 sessions)** —
+  still outstanding, carried over from P9's own handover note; no dedicated perf pass was run
+  this phase either.
+- **PostgreSQL/D1 runtime verification** — unchanged from every prior phase's inherited status.
+- **`react-router`/`react-router-dom`'s two moderate-severity advisories** (open redirect via
+  backslash, arbitrary constructor injection in SSR hydration — neither applicable here, this app
+  has no SSR) were left as-is: `--audit-level=high` doesn't fail on them, and the available fix
+  (`react-router-dom@7.18.3`) is a major-version bump outside this phase's scope. Worth doing as
+  a deliberate, tested upgrade later, not a drive-by dependency bump here.
+
+### Decisions taken
+
+- **Settings validation always checks the FINAL merged state**, not just fields present in one
+  PATCH request — lets a user change one field at a time without the weights-sum/threshold-order
+  invariants getting in the way, while still genuinely enforcing them against what the row will
+  look like afterward.
+- **The JSON export is deliberately NOT fully lossless in one respect**: `passwordHash` and
+  `RefreshToken` rows are excluded on purpose (auth secrets, meaningless to re-import). The
+  phase's acceptance criterion ("re-imported by hand... reproduces the original data") is read as
+  applying to *study data*, which is what every other field of the export covers completely.
+- **The coverage gate measures unit + integration together**, not the unit suite alone — the
+  right answer for "what % of this codebase is actually tested", given this project's established
+  convention (since P1) of testing routes/repositories against a real database rather than
+  mocking Prisma.
+- **The dependency-audit gate is a small wrapper script with one documented allowlist entry**,
+  not a bare `npm audit --audit-level=high` — the alternative (accepting the `npm audit fix`
+  resolution that desynced the `prisma` CLI from `@prisma/client` and broke every integration
+  test) was strictly worse. See repo memory (`/memories/repo/environment.md`) for the full
+  incident writeup — re-read it before ever running `npm audit fix`/`fix --force` on this repo
+  again.
+- **Docker images run the same `tsx`-direct entrypoint as local dev**, not a separately-built
+  compiled-JS path — consistency with what this repo's own scripts already exercise and trust,
+  rather than introducing a second, never-tested runtime path.
+
+### Handover to P11
+
+- The Docker deployment target (task 10) is the first thing to actually run on a machine with
+  Docker available, before P11 assumes anything about it working.
+- `packages/db/src/export.ts`'s pagination pattern (`{ skip, take }` on five repository methods,
+  a small `paginate()` async generator) is the template to reuse if D1 (P11) ever needs its own
+  bounded-read discipline for a bulk export-like operation — D1/Workers is exactly the
+  environment §14.4 had in mind when this phase's export was required to page internally rather
+  than issue one unbounded query.
+- `scripts/check-audit.mjs`'s allowlist is intentionally tiny (one entry) and reviewed with a
+  written reachability justification — if P11 introduces new Cloudflare-side dependencies with
+  their own advisories, extend the SAME pattern rather than loosening `--audit-level` or adding a
+  second, parallel audit mechanism.
+- The E2E suite (`e2e/full-flow.spec.ts`) is written against the T1 (Node/SQLite) target only; if
+  P11 wants an E2E pass against a deployed Worker preview (its own task 9), it can very likely
+  reuse this same spec file unmodified against a different `baseURL`/webServer config, per the
+  plan's own explicit instruction that "the same Playwright suite from P10, unmodified" is what's
+  expected there.
+
+
 
 
 

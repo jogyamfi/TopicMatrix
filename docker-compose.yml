@@ -1,0 +1,64 @@
+# Self-hosted, full-stack deployment target (NF-11, delivery-plan.md P10 task 10): brings up
+# PostgreSQL, the Node API and the web SPA from a clean checkout with one command
+# (`docker compose up`). This is DIFFERENT from docker-compose.dev.yml, which starts ONLY
+# PostgreSQL for a developer running the app on the host (FR-D.9) — this file containerises the
+# whole application. NOT verified with a real `docker compose up` on this machine (no Docker
+# available here) — see documents/planning/progress.md's P10 handover notes for what to check
+# first on a machine that has Docker.
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: topicmatrix
+      POSTGRES_PASSWORD: topicmatrix
+      POSTGRES_DB: topicmatrix
+    volumes:
+      - topicmatrix-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U topicmatrix']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      DATABASE_PROVIDER: postgresql
+      DATABASE_URL: postgresql://topicmatrix:topicmatrix@postgres:5432/topicmatrix
+      # Replace with a real, private secret before deploying anywhere but a local trial run
+      # (SEC-5 — the app fails closed on a known placeholder or a value under 32 characters).
+      JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-real-32-plus-character-secret}
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://localhost:3000/healthz', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '8080:80'
+
+volumes:
+  topicmatrix-postgres-data:

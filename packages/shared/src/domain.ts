@@ -22,6 +22,11 @@ export type HealthStatus = z.infer<typeof healthStatusSchema>;
 
 export const DEFAULT_MANUAL_INTERVALS = [1, 3, 7, 14, 30, 60] as const;
 
+// Mirrors UserSettings' Prisma-level defaults (prisma/model.prisma) — the reset-to-defaults
+// action (FR-8.2, P10) restores exactly these values rather than duplicating them by hand.
+export const DEFAULT_STRONG_THRESHOLD = 75;
+export const DEFAULT_NEEDS_REVIEW_THRESHOLD = 50;
+
 export const manualIntervalsSchema = z.array(z.number().int().positive()).min(1);
 export type ManualIntervals = z.infer<typeof manualIntervalsSchema>;
 

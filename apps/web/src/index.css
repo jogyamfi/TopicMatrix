@@ -29,7 +29,7 @@
     /* Health-status palette — never the only signal conveying status (NF-4); always paired
        with an icon + text label via HealthStatusBadge. */
     --health-strong: 142 71% 35%;
-    --health-needs-review: 38 92% 40%;
+    --health-needs-review: 38 92% 30%;
     --health-at-risk: 0 72% 51%;
     --health-not-started: 215 16% 57%;
   }

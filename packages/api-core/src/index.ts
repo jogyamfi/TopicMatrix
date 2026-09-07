@@ -12,6 +12,8 @@ import { registerSessionRoutes } from './routes/sessions.js';
 import { registerTagRoutes } from './routes/tags.js';
 import { registerReviewRoutes } from './routes/review.js';
 import { registerAnalyticsRoutes } from './routes/analytics.js';
+import { registerSettingsRoutes } from './routes/settings.js';
+import { registerExportRoutes } from './routes/export.js';
 
 /**
  * Runtime-agnostic Hono app. Takes a deps *factory*, invoked fresh on every request, so
@@ -40,6 +42,8 @@ export function createApp(buildRequestDeps: () => AppDeps): Hono<AppEnv> {
   registerTagRoutes(app);
   registerReviewRoutes(app);
   registerAnalyticsRoutes(app);
+  registerSettingsRoutes(app);
+  registerExportRoutes(app);
 
   return app;
 }

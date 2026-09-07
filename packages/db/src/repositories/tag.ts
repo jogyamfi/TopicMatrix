@@ -1,8 +1,14 @@
 import { AppError, normaliseKey } from '@topicmatrix/shared';
 import type { PrismaClientOrTx, Tag, Topic } from '../types.js';
 
+export interface TopicTagLink {
+  topicId: string;
+  tagId: string;
+}
+
 export interface TagRepository {
-  list(userId: string): Promise<Tag[]>;
+  /** `skip`/`take` (P10 export) page through results instead of one unbounded query. */
+  list(userId: string, opts?: { skip?: number; take?: number }): Promise<Tag[]>;
   findById(userId: string, tagId: string): Promise<Tag | null>;
   create(userId: string, name: string): Promise<Tag>;
   delete(userId: string, tagId: string): Promise<void>;
@@ -11,6 +17,11 @@ export interface TagRepository {
   topicsForTag(userId: string, tagId: string): Promise<Topic[]>;
   attachToTopic(userId: string, topicId: string, tagId: string): Promise<void>;
   detachFromTopic(userId: string, topicId: string, tagId: string): Promise<void>;
+  /** Every topic-tag attachment across every subject the user owns (P10 export). */
+  listAllTopicTagsForUser(
+    userId: string,
+    opts?: { skip?: number; take?: number },
+  ): Promise<TopicTagLink[]>;
 }
 
 export function createTagRepository(client: PrismaClientOrTx): TagRepository {
@@ -29,7 +40,13 @@ export function createTagRepository(client: PrismaClientOrTx): TagRepository {
   }
 
   return {
-    list: (userId) => client.tag.findMany({ where: { userId }, orderBy: { name: 'asc' } }),
+    list: (userId, opts) =>
+      client.tag.findMany({
+        where: { userId },
+        orderBy: { name: 'asc' },
+        ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
+        ...(opts?.take !== undefined ? { take: opts.take } : {}),
+      }),
     findById: (userId, tagId) => client.tag.findFirst({ where: { id: tagId, userId } }),
     create: async (userId, name) => {
       const nameNormalised = normaliseKey(name);
@@ -65,5 +82,13 @@ export function createTagRepository(client: PrismaClientOrTx): TagRepository {
       await Promise.all([assertTopicOwned(userId, topicId), assertTagOwned(userId, tagId)]);
       await client.topicTag.deleteMany({ where: { topicId, tagId } });
     },
+    listAllTopicTagsForUser: (userId, opts) =>
+      client.topicTag.findMany({
+        where: { topic: { subject: { userId } } },
+        select: { topicId: true, tagId: true },
+        orderBy: { topicId: 'asc' },
+        ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
+        ...(opts?.take !== undefined ? { take: opts.take } : {}),
+      }),
   };
 }

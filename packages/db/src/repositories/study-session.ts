@@ -21,8 +21,11 @@ export interface StudySessionRepository {
   listByTopic(userId: string, topicId: string): Promise<StudySession[]>;
   /** Every session for every topic in a subject, in one query (P5) — avoids an N+1 when scoring a whole tree. */
   listBySubject(userId: string, subjectId: string): Promise<StudySession[]>;
-  /** Every session across every subject the user owns (P8 review queue). */
-  listAllForUser(userId: string): Promise<StudySession[]>;
+  /**
+   * Every session across every subject the user owns (P8 review queue). `skip`/`take` (P10
+   * export) page through results instead of one unbounded query.
+   */
+  listAllForUser(userId: string, opts?: { skip?: number; take?: number }): Promise<StudySession[]>;
   findById(userId: string, sessionId: string): Promise<StudySession | null>;
   /** `accuracy` is always computed here from questionsCorrect/questionsAttempted (FR-4.2) — never accepted as input. */
   create(userId: string, input: CreateStudySessionInput): Promise<StudySession>;
@@ -60,8 +63,13 @@ export function createStudySessionRepository(client: PrismaClientOrTx): StudySes
         where: { userId, topic: { subjectId } },
         orderBy: { studiedOn: 'desc' },
       }),
-    listAllForUser: (userId) =>
-      client.studySession.findMany({ where: { userId }, orderBy: { studiedOn: 'desc' } }),
+    listAllForUser: (userId, opts) =>
+      client.studySession.findMany({
+        where: { userId },
+        orderBy: { studiedOn: 'desc' },
+        ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
+        ...(opts?.take !== undefined ? { take: opts.take } : {}),
+      }),
     findById: (userId, sessionId) => client.studySession.findFirst({ where: { id: sessionId, userId } }),
     create: async (userId, input) => {
       const topic = await client.topic.findFirst({

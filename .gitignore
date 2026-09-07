@@ -8,6 +8,12 @@ coverage/
 !.env.example
 dev.db
 dev.db-journal
+e2e-test.db
+e2e-test.db-journal
+prisma/sqlite/e2e-test.db
+prisma/sqlite/e2e-test.db-journal
+playwright-report/
+test-results/
 .wrangler/
 .turbo/
 *.log

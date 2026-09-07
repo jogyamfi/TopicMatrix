@@ -19,6 +19,8 @@ export {
   healthStatusSchema,
   manualIntervalsSchema,
   DEFAULT_MANUAL_INTERVALS,
+  DEFAULT_STRONG_THRESHOLD,
+  DEFAULT_NEEDS_REVIEW_THRESHOLD,
   parseManualIntervals,
   stringifyManualIntervals,
 } from './domain.js';
@@ -196,3 +198,17 @@ export type {
   RetentionResponse,
   AccuracyConfidenceResponse,
 } from './analytics.js';
+export {
+  updateUserSettingsRequestSchema,
+  userSettingsViewSchema,
+  userSettingsResponseSchema,
+  settingsPreviewRequestSchema,
+  settingsPreviewResponseSchema,
+} from './settings.js';
+export type {
+  UpdateUserSettingsRequest,
+  UserSettingsView,
+  UserSettingsResponse,
+  SettingsPreviewRequest,
+  SettingsPreviewResponse,
+} from './settings.js';

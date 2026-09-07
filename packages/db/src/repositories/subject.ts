@@ -13,7 +13,11 @@ export interface CreateSubjectInput {
 export type UpdateSubjectInput = Partial<CreateSubjectInput> & { isArchived?: boolean };
 
 export interface SubjectRepository {
-  list(userId: string, opts?: { includeArchived?: boolean }): Promise<Subject[]>;
+  /** `skip`/`take` (P10 export) page through results instead of one unbounded query. */
+  list(
+    userId: string,
+    opts?: { includeArchived?: boolean; skip?: number; take?: number },
+  ): Promise<Subject[]>;
   /** Returns null (never throws) for a missing OR not-owned id — callers must not distinguish. */
   findById(userId: string, subjectId: string): Promise<Subject | null>;
   create(userId: string, input: CreateSubjectInput): Promise<Subject>;
@@ -35,6 +39,8 @@ export function createSubjectRepository(client: PrismaClientOrTx): SubjectReposi
       client.subject.findMany({
         where: { userId, ...(opts?.includeArchived ? {} : { isArchived: false }) },
         orderBy: { sortOrder: 'asc' },
+        ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
+        ...(opts?.take !== undefined ? { take: opts.take } : {}),
       }),
     findById: (userId, subjectId) => client.subject.findFirst({ where: { id: subjectId, userId } }),
     create: async (userId, input) => {

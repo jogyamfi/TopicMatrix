@@ -16,8 +16,14 @@ export interface CompetencySnapshotRepository {
     topicId: string,
     opts?: { from?: Date; to?: Date },
   ): Promise<CompetencySnapshot[]>;
-  /** Every snapshot across every subject the user owns (P9 Topic Health View's review trend). */
-  listAllForUser(userId: string): Promise<CompetencySnapshot[]>;
+  /**
+   * Every snapshot across every subject the user owns (P9 Topic Health View's review trend).
+   * `skip`/`take` (P10 export) page through results instead of one unbounded query.
+   */
+  listAllForUser(
+    userId: string,
+    opts?: { skip?: number; take?: number },
+  ): Promise<CompetencySnapshot[]>;
   create(userId: string, topicId: string, input: CreateCompetencySnapshotInput): Promise<CompetencySnapshot>;
 }
 
@@ -44,10 +50,12 @@ export function createCompetencySnapshotRepository(
         orderBy: { capturedOn: 'asc' },
       });
     },
-    listAllForUser: (userId) =>
+    listAllForUser: (userId, opts) =>
       client.competencySnapshot.findMany({
         where: { topic: { subject: { userId } } },
         orderBy: { capturedOn: 'asc' },
+        ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
+        ...(opts?.take !== undefined ? { take: opts.take } : {}),
       }),
     create: async (userId, topicId, input) => {
       await assertOwned(userId, topicId);

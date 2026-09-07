@@ -19,8 +19,14 @@ export interface ReviewScheduleRepository {
   find(userId: string, topicId: string): Promise<ReviewSchedule | null>;
   /** Every schedule for every topic in a subject, in one query (P5) — avoids an N+1 when scoring a whole tree. */
   listBySubject(userId: string, subjectId: string): Promise<ReviewSchedule[]>;
-  /** Every schedule across every subject the user owns (P8 review queue). */
-  listAllForUser(userId: string): Promise<ReviewSchedule[]>;
+  /**
+   * Every schedule across every subject the user owns (P8 review queue). `skip`/`take` (P10
+   * export) page through results instead of one unbounded query.
+   */
+  listAllForUser(
+    userId: string,
+    opts?: { skip?: number; take?: number },
+  ): Promise<ReviewSchedule[]>;
   /** One schedule per topic (§6.1) — create-or-replace, as scheduling recalculation always does (FR-4.3). */
   upsert(userId: string, topicId: string, input: UpsertReviewScheduleInput): Promise<ReviewSchedule>;
 }
@@ -40,8 +46,13 @@ export function createReviewScheduleRepository(client: PrismaClientOrTx): Review
     },
     listBySubject: (userId, subjectId) =>
       client.reviewSchedule.findMany({ where: { topic: { subjectId, subject: { userId } } } }),
-    listAllForUser: (userId) =>
-      client.reviewSchedule.findMany({ where: { topic: { subject: { userId } } } }),
+    listAllForUser: (userId, opts) =>
+      client.reviewSchedule.findMany({
+        where: { topic: { subject: { userId } } },
+        orderBy: { topicId: 'asc' },
+        ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
+        ...(opts?.take !== undefined ? { take: opts.take } : {}),
+      }),
     upsert: async (userId, topicId, input) => {
       await assertOwned(userId, topicId);
       return client.reviewSchedule.upsert({

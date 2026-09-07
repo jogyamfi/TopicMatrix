@@ -40,11 +40,65 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
-      # Dependency audit gate (SEC-9) is a P10 deliverable, not P0 — deferred so dev-only
-      # Cloudflare tooling transitive advisories don't block this phase's CI.
       - name: Verify T1 loop (db:migrate against ${{ matrix.provider }})
         run: npm run db:migrate
       - run: npm run build
+
+  coverage:
+    # Coverage gate (NF-6, delivery-plan.md P10 task 7): 90% on packages/core, 70% overall,
+    # measured across the unit + real-database integration suites together (see
+    # vitest.coverage.config.ts) — most of packages/db and packages/api-core/src/routes is only
+    # exercised by the integration suite, not the fast unit-only one.
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-test-only-secret-at-least-32-characters
+      DATABASE_PROVIDER: sqlite
+      DATABASE_URL: file:./dev.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage
+
+  dependency-audit:
+    # SEC-9: fails on any high/critical advisory reachable from a production dependency, with
+    # one documented, non-reachable exception — see scripts/check-audit.mjs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run audit
+
+  e2e:
+    # Playwright E2E suite (delivery-plan.md P10 task 6), plus automated axe accessibility
+    # scans (task 5) — runs against the real T1 loop (SQLite) via scripts/e2e-server.mjs's own
+    # scratch database.
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   worker-bundle-size:
     runs-on: ubuntu-latest

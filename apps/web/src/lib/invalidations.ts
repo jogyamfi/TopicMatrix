@@ -8,6 +8,16 @@ export const invalidations = {
   afterAdminUserUpdate: () => queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() }),
   afterAdminUserDelete: () => queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() }),
 
+  // Scoring weights/thresholds affect every score/health status shown anywhere in the app —
+  // invalidate the settings row itself plus every subject/topic/analytics view that derives from it.
+  afterSettingsWrite: () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.detail() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.subjects.list() }),
+      queryClient.invalidateQueries({ queryKey: ['analytics'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() }),
+    ]),
+
   afterSubjectWrite: () => queryClient.invalidateQueries({ queryKey: queryKeys.subjects.list() }),
   afterSubjectDelete: () => queryClient.invalidateQueries({ queryKey: queryKeys.subjects.list() }),
 

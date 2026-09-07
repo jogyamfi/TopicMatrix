@@ -75,6 +75,19 @@ documents/planning/        SRS, delivery plan, ADRs, phase handover notes
 | `npm run test:cf` | Cloudflare-Workers-runtime tests (needs `wrangler`/`workerd`; never required for T1) |
 | `npm run test:integration` | Repository/UnitOfWork tests against a real, migrated SQLite database |
 | `npm run test:integration:pg` | Same suite against PostgreSQL — needs `docker-compose.dev.yml` running |
+| `npm run test:coverage` | Unit + integration suites together, with the NF-6 coverage gate (≥70% overall, ≥90% `packages/core`) |
+| `npm run test:e2e` | Playwright end-to-end suite (first run: `npx playwright install chromium`) |
+| `npm run audit` | Production-dependency security audit gate (SEC-9) — see `scripts/check-audit.mjs` |
+
+## Self-hosted deployment (Docker) and backups
+
+See [documents/guides/deployment.md](documents/guides/deployment.md) for `docker compose up`
+(API + web + PostgreSQL from a clean checkout) and PostgreSQL/SQLite backup-and-restore steps.
+
+## How scoring and scheduling work
+
+A user-facing explainer (no implementation details) lives at
+[documents/guides/scoring-and-scheduling.md](documents/guides/scoring-and-scheduling.md).
 
 ## Cloudflare Workers target (optional)
 

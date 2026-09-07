@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, LayoutDashboard, ListChecks, Tag, Users } from 'lucide-react';
+import { BarChart3, BookOpen, Download, LayoutDashboard, ListChecks, Settings, Tag, Users } from 'lucide-react';
 import type { Role } from '@topicmatrix/shared';
 
 export interface NavItem {
@@ -14,6 +14,8 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/subjects', label: 'Subjects', icon: BookOpen },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/tags', label: 'Tags', icon: Tag },
+  { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/export', label: 'Export', icon: Download },
   { to: '/admin/users', label: 'Users', icon: Users, adminOnly: true },
 ];
 
