@@ -41,14 +41,18 @@ async function main(): Promise<void> {
     const temporaryPassword = process.env.SEED_ADMIN_PASSWORD ?? randomOpaqueToken(9);
     const passwordHash = await passwordService.hash(temporaryPassword);
 
-    const admin = await createUserWithDefaultSettings(db, {
-      email: ADMIN_EMAIL,
-      emailNormalised: ADMIN_EMAIL.toLowerCase(),
-      passwordHash,
-      displayName: ADMIN_DISPLAY_NAME,
-      role: 'ADMIN',
-      mustChangePassword: true,
-    });
+    const admin = await createUserWithDefaultSettings(
+      db,
+      {
+        email: ADMIN_EMAIL,
+        emailNormalised: ADMIN_EMAIL.toLowerCase(),
+        passwordHash,
+        displayName: ADMIN_DISPLAY_NAME,
+        role: 'ADMIN',
+        mustChangePassword: true,
+      },
+      { timezone: config.defaultTimezone },
+    );
 
     console.log(
       JSON.stringify({

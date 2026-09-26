@@ -8,6 +8,7 @@ import { Toaster } from './components/toaster';
 import { TooltipProvider } from './components/ui/tooltip';
 import { Skeleton } from './components/ui/skeleton';
 import { AppShell } from './components/layout/app-shell';
+import { SubjectName, TopicName, type RouteHandle } from './components/layout/breadcrumbs';
 import {
   AdminRoute,
   ProtectedRoute,
@@ -30,6 +31,21 @@ const AnalyticsPage = lazy(() => import('./pages/analytics/analytics-page'));
 const SettingsPage = lazy(() => import('./pages/settings/settings-page'));
 const ExportPage = lazy(() => import('./pages/settings/export-page'));
 const NotFoundPage = lazy(() => import('./pages/not-found-page'));
+
+const subjectCrumbs: RouteHandle = {
+  crumbs: ({ subjectId = '' }) => [
+    { to: '/subjects', label: 'Subjects' },
+    { label: <SubjectName subjectId={subjectId} /> },
+  ],
+};
+
+const topicCrumbs: RouteHandle = {
+  crumbs: ({ subjectId = '', topicId = '' }) => [
+    { to: '/subjects', label: 'Subjects' },
+    { to: `/subjects/${subjectId}`, label: <SubjectName subjectId={subjectId} /> },
+    { label: <TopicName topicId={topicId} /> },
+  ],
+};
 
 function PageFallback(): React.JSX.Element {
   return (
@@ -65,12 +81,8 @@ const router = createBrowserRouter(
           <Route element={<RequirePasswordChanged />}>
             <Route index element={<DashboardPage />} handle={{ breadcrumb: 'Dashboard' }} />
             <Route path="/subjects" element={<SubjectsPage />} handle={{ breadcrumb: 'Subjects' }} />
-            <Route path="/subjects/:subjectId" element={<SubjectTreePage />} handle={{ breadcrumb: 'Topic tree' }} />
-            <Route
-              path="/subjects/:subjectId/topics/:topicId"
-              element={<TopicDetailPage />}
-              handle={{ breadcrumb: 'Topic' }}
-            />
+            <Route path="/subjects/:subjectId" element={<SubjectTreePage />} handle={subjectCrumbs} />
+            <Route path="/subjects/:subjectId/topics/:topicId" element={<TopicDetailPage />} handle={topicCrumbs} />
             <Route path="/tags" element={<TagsPage />} handle={{ breadcrumb: 'Tags' }} />
             <Route path="/review" element={<ReviewQueuePage />} handle={{ breadcrumb: 'Review' }} />
             <Route

@@ -29,3 +29,10 @@ export async function toApiError(res: Response): Promise<ApiError> {
     body?.error?.details,
   );
 }
+
+/** A user-facing message for any thrown value (API errors carry the server's message). */
+export function describeError(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return 'Unknown error';
+}

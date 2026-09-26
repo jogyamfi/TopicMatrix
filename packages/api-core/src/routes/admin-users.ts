@@ -73,13 +73,17 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
     const temporaryPassword = randomOpaqueToken(9);
     const passwordHash = await deps.passwordService.hash(temporaryPassword);
 
-    const user = await createUserWithDefaultSettings(deps.db, {
-      email: body.email,
-      emailNormalised,
-      passwordHash,
-      displayName: body.displayName,
-      mustChangePassword: true,
-    });
+    const user = await createUserWithDefaultSettings(
+      deps.db,
+      {
+        email: body.email,
+        emailNormalised,
+        passwordHash,
+        displayName: body.displayName,
+        mustChangePassword: true,
+      },
+      { timezone: deps.config.defaultTimezone },
+    );
 
     await recordAudit(deps, {
       actorId: actor.id,

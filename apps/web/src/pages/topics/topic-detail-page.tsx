@@ -2,10 +2,9 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ListChecks, Pause, Play, Plus, Rocket, X } from 'lucide-react';
+import { ArrowLeft, ListChecks, MoreHorizontal, Pause, Pencil, Play, Plus, Rocket, X } from 'lucide-react';
 import {
   createTagRequestSchema,
-  historyResponseSchema,
   scheduleOverrideResponseSchema,
   scheduleResponseSchema,
   sessionsListResponseSchema,
@@ -20,7 +19,7 @@ import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
 import { HealthStatusBadge, type HealthStatus } from '../../components/health-status-badge';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -39,6 +38,8 @@ import { EditSessionDialog } from './edit-session-dialog';
 import { DeleteSessionDialog } from './delete-session-dialog';
 import { SessionHistoryTable } from './session-history-table';
 import { LaunchReviewDialog } from '../review/launch-review-dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
+import { TopicProgress } from './topic-progress';
 import { formatDateOnly } from '../../lib/dates';
 
 function ScoreCard({ title, score, health }: { title: string; score: number | null; health: string | null }): React.JSX.Element {
@@ -174,19 +175,13 @@ export default function TopicDetailPage(): React.JSX.Element {
     queryFn: () => apiFetch(`/topics/${id}/sessions`, sessionsListResponseSchema),
     enabled: id.length > 0,
   });
-  // Retention-curve data source (FR-7.7) — fetched here only to confirm history exists; P9 owns
-  // the actual chart.
-  useQuery({
-    queryKey: queryKeys.sessions.history(id),
-    queryFn: () => apiFetch(`/topics/${id}/history`, historyResponseSchema),
-    enabled: id.length > 0,
-  });
 
   const [editOpen, setEditOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [editSession, setEditSession] = useState<StudySessionView | null>(null);
   const [deleteSession, setDeleteSession] = useState<StudySessionView | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const suspendMutation = useMutation({
     mutationFn: (suspended: boolean) =>
@@ -216,30 +211,32 @@ export default function TopicDetailPage(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-2">
           <Button asChild variant="ghost" size="icon">
             <Link to={`/subjects/${subjId}`} aria-label="Back to topic tree">
               <ArrowLeft />
             </Link>
           </Button>
-          <div>
-            <h1 className="text-xl font-semibold">{topic.name}</h1>
+          <div className="min-w-0">
+            <h1 className="break-words text-xl font-semibold">{topic.name}</h1>
             {topic.notes ? <p className="max-w-prose text-sm text-muted-foreground">{topic.notes}</p> : null}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button onClick={() => setLogOpen(true)}>
             <ListChecks /> Log session
           </Button>
           <Button variant="outline" onClick={() => setReviewOpen(true)}>
             <Rocket /> Review this topic
           </Button>
-          <Button variant="outline" onClick={() => setEditOpen(true)}>
-            Edit
+          {/* Secondary actions: inline from `sm` up, folded into "More actions" on phones. */}
+          <Button variant="outline" className="hidden sm:inline-flex" onClick={() => setEditOpen(true)}>
+            <Pencil /> Edit
           </Button>
           <Button
             variant="outline"
+            className="hidden sm:inline-flex"
             disabled={suspendMutation.isPending}
             onClick={() => suspendMutation.mutate(!topic.isSuspended)}
           >
@@ -253,6 +250,44 @@ export default function TopicDetailPage(): React.JSX.Element {
               </>
             )}
           </Button>
+          <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon" className="sm:hidden" aria-label="More actions">
+                <MoreHorizontal />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="flex w-48 flex-col gap-1 p-1">
+              <Button
+                variant="ghost"
+                className="justify-start"
+                onClick={() => {
+                  setMoreOpen(false);
+                  setEditOpen(true);
+                }}
+              >
+                <Pencil /> Edit
+              </Button>
+              <Button
+                variant="ghost"
+                className="justify-start"
+                disabled={suspendMutation.isPending}
+                onClick={() => {
+                  setMoreOpen(false);
+                  suspendMutation.mutate(!topic.isSuspended);
+                }}
+              >
+                {topic.isSuspended ? (
+                  <>
+                    <Play /> Resume reviews
+                  </>
+                ) : (
+                  <>
+                    <Pause /> Pause reviews
+                  </>
+                )}
+              </Button>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -282,6 +317,8 @@ export default function TopicDetailPage(): React.JSX.Element {
           </CardContent>
         </Card>
       </div>
+
+      <TopicProgress topicId={topic.id} hasSessions={(sessionsQuery.data?.sessions.length ?? 0) > 0} />
 
       <div>
         <h2 className="mb-2 text-lg font-semibold">Session history</h2>

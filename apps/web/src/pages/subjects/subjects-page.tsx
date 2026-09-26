@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Archive, BookOpen, Clock, ListTree, Plus } from 'lucide-react';
 import { subjectsListResponseSchema, type SubjectListItem } from '@topicmatrix/shared';
 import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Skeleton } from '../../components/ui/skeleton';
@@ -106,7 +106,13 @@ export default function SubjectsPage(): React.JSX.Element {
     queryFn: () => apiFetch('/subjects', subjectsListResponseSchema),
   });
 
-  const [createOpen, setCreateOpen] = useState(false);
+  // `?new=1` (the dashboard's getting-started link) opens the create dialog straight away.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [createOpen, setCreateOpenState] = useState(() => searchParams.get('new') === '1');
+  const setCreateOpen = (open: boolean) => {
+    setCreateOpenState(open);
+    if (!open && searchParams.has('new')) setSearchParams({}, { replace: true });
+  };
   const [editTarget, setEditTarget] = useState<SubjectListItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SubjectListItem | null>(null);
 

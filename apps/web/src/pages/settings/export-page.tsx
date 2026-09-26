@@ -6,7 +6,7 @@ import { subjectsListResponseSchema } from '@topicmatrix/shared';
 import { authStore } from '../../lib/auth-store';
 import { apiFetch } from '../../lib/api-client';
 import { toast } from '../../lib/toast-store';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';

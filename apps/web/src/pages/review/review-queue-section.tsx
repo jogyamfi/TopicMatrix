@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ListChecks, Minus, Pause, TrendingDown, TrendingUp } from 'lucide-react';
+import { CheckCircle2, ListChecks, Minus, Pause, Sprout, TrendingDown, TrendingUp } from 'lucide-react';
 import {
   reviewQueueResponseSchema,
   scheduleOverrideResponseSchema,
@@ -11,7 +11,8 @@ import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
+import { formatDateOnly } from '../../lib/dates';
 import { HealthStatusBadge, type HealthStatus } from '../../components/health-status-badge';
 import { EmptyState } from '../../components/empty-state';
 import { Button } from '../../components/ui/button';
@@ -110,13 +111,26 @@ function BucketSection({
   description,
   items,
   onLog,
+  emptyNote,
 }: {
   title: string;
   description: string;
   items: readonly ReviewQueueItem[];
   onLog: (item: ReviewQueueItem) => void;
+  /** Shown instead of hiding the bucket when it's empty (the full page); omitted = hide it. */
+  emptyNote?: string;
 }): React.JSX.Element | null {
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    if (!emptyNote) return null;
+    return (
+      <div>
+        <h3 className="text-sm font-semibold">
+          {title} <span className="font-normal text-muted-foreground">(0)</span>
+        </h3>
+        <p className="text-xs text-muted-foreground">{emptyNote}</p>
+      </div>
+    );
+  }
   return (
     <div>
       <h3 className="text-sm font-semibold">
@@ -129,6 +143,51 @@ function BucketSection({
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * Never-studied topics (R3 U-5) — not due (SRS Q2), so kept out of the due buckets, but listed so
+ * a new learner's queue shows where to start. A native `<details>`: collapsible, keyboard- and
+ * screen-reader-friendly for free; open by default when nothing is due.
+ */
+function NotStartedSection({
+  items,
+  total,
+  defaultOpen,
+  onLog,
+}: {
+  items: readonly ReviewQueueItem[];
+  total: number;
+  defaultOpen: boolean;
+  onLog: (item: ReviewQueueItem) => void;
+}): React.JSX.Element | null {
+  if (total === 0) return null;
+  return (
+    <details open={defaultOpen} className="rounded-md border p-3">
+      <summary className="cursor-pointer text-sm font-semibold">
+        Not started yet <span className="font-normal text-muted-foreground">({total})</span>
+      </summary>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Topics you haven&apos;t studied yet. Log a first session to start scheduling their reviews.
+        {total > items.length ? ` Showing the ${items.length} oldest.` : ''}
+      </p>
+      <ul className="mt-2">
+        {items.map((item) => (
+          <li key={item.topicId} className="flex flex-wrap items-center justify-between gap-3 border-b py-2 last:border-0">
+            <div className="min-w-0 flex-1">
+              <Link to={`/subjects/${item.subjectId}/topics/${item.topicId}`} className="font-medium hover:underline">
+                {item.name}
+              </Link>
+              <p className="truncate text-xs text-muted-foreground">{item.subjectName}</p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => onLog(item)}>
+              <Sprout /> Log first session
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -156,7 +215,7 @@ export function ReviewQueueSection({ compact = false }: { compact?: boolean }): 
     );
   }
 
-  const { overdue, dueToday, dueNext7Days } = queueQuery.data;
+  const { overdue, dueToday, dueNext7Days, notStarted, notStartedTotal, nextReviewOn } = queueQuery.data;
   const total = overdue.length + dueToday.length + dueNext7Days.length;
   const limit = compact ? 5 : Number.POSITIVE_INFINITY;
   const take = (items: readonly ReviewQueueItem[], used: number) => items.slice(0, Math.max(0, limit - used));
@@ -164,32 +223,63 @@ export function ReviewQueueSection({ compact = false }: { compact?: boolean }): 
   const shownOverdue = take(overdue, 0);
   const shownDueToday = take(dueToday, shownOverdue.length);
   const shownDueNext7 = take(dueNext7Days, shownOverdue.length + shownDueToday.length);
-
-  if (total === 0) {
-    return (
-      <EmptyState
-        icon={<CheckCircle2 className="size-8" />}
-        title="Nothing due"
-        description="Every topic is on schedule. Check back tomorrow, or start a weakest-topics session."
-      />
-    );
-  }
+  const nextReviewNote = nextReviewOn ? `Next review: ${formatDateOnly(nextReviewOn)}.` : undefined;
 
   return (
     <div className="flex flex-col gap-6">
-      <BucketSection title="Overdue" description="Past their scheduled review date." items={shownOverdue} onLog={setLogTarget} />
-      <BucketSection title="Due today" description="Scheduled for today." items={shownDueToday} onLog={setLogTarget} />
-      <BucketSection
-        title="Due in the next 7 days"
-        description="Coming up soon."
-        items={shownDueNext7}
-        onLog={setLogTarget}
-      />
+      {total === 0 ? (
+        <EmptyState
+          icon={<CheckCircle2 className="size-8" />}
+          title="Nothing due"
+          description={
+            nextReviewNote
+              ? `Every topic is on schedule. ${nextReviewNote}`
+              : notStartedTotal > 0
+                ? 'No reviews are scheduled yet. Start with one of the topics below.'
+                : 'Add topics and log a session to start building your review schedule.'
+          }
+        />
+      ) : (
+        <>
+          <BucketSection
+            title="Overdue"
+            description="Past their scheduled review date."
+            items={shownOverdue}
+            onLog={setLogTarget}
+            {...(compact ? {} : { emptyNote: 'Nothing overdue.' })}
+          />
+          <BucketSection
+            title="Due today"
+            description="Scheduled for today."
+            items={shownDueToday}
+            onLog={setLogTarget}
+            {...(compact ? {} : { emptyNote: 'Nothing else due today.' })}
+          />
+          <BucketSection
+            title="Due in the next 7 days"
+            description="Coming up soon."
+            items={shownDueNext7}
+            onLog={setLogTarget}
+            {...(compact ? {} : { emptyNote: 'Nothing due in the next 7 days.' })}
+          />
+        </>
+      )}
       {compact && total > limit ? (
         <Button asChild variant="outline" size="sm" className="w-fit">
           <Link to="/review">View all {total} due</Link>
         </Button>
       ) : null}
+      {compact ? (
+        total === 0 && notStartedTotal > 0 ? (
+          <Button asChild variant="outline" size="sm" className="w-fit">
+            <Link to="/review">
+              {notStartedTotal} topic{notStartedTotal === 1 ? '' : 's'} not started yet
+            </Link>
+          </Button>
+        ) : null
+      ) : (
+        <NotStartedSection items={notStarted} total={notStartedTotal} defaultOpen={total === 0} onLog={setLogTarget} />
+      )}
       <LogSessionDialog
         topic={logTarget ? { id: logTarget.topicId, subjectId: logTarget.subjectId, name: logTarget.name } : null}
         onOpenChange={(open) => !open && setLogTarget(null)}

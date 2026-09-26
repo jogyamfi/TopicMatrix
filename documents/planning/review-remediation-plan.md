@@ -208,6 +208,29 @@ postgres migration and the D1 migration all review cleanly.
 
 ## Phase R3 — Everyday UX improvements
 
+**Status: implemented.** Decisions taken while implementing it:
+- **Field errors:** `useFormErrors` plus `<FieldError>`/`<FormError>` (`apps/web/src/lib/form-errors.ts`),
+  adopted in the Log/Edit Session, Subject, Create/Edit Topic, Create User and Settings forms.
+  These forms use `noValidate`, so every message appears next to its field instead of in a browser
+  popup, and the first invalid field gets focus.
+- **Timezone:** the "admin's configured default" is a new `DEFAULT_TIMEZONE` env var, validated
+  as an IANA zone. The searchable picker is a native `<input list>` combobox fed by
+  `Intl.supportedValuesOf('timeZone')`, plus a "Use this device's timezone" shortcut. The banner
+  is remembered per (saved zone, device zone) pair.
+- **Previews:** the grade is computed locally with `computeGrade`. The settings preview fetches
+  the sample topic's scoring inputs once (the response now includes `sample`), then re-scores
+  locally with a new pure `scoreSample` in `packages/core`, which the server uses too.
+- **Topic page:** the "…" menu is a popover of plain buttons. Breadcrumbs support a
+  `handle.crumbs(params)` trail with live subject/topic names.
+- **Launcher:** the topic link opens in a new tab (not a side sheet). Outcomes and the summary
+  live in the existing localStorage run; older saved runs load with no outcomes.
+- **Additional fixes found along the way:** every tree row's icon buttons now carry the topic
+  name in their accessible name ("Log session: Algebra"). The launcher's Snooze select no longer
+  keeps showing the previous item's choice. `describeError` moved from the admin users page to
+  `lib/api-error.ts`: importing it everywhere had pulled the admin page into other chunks.
+- **Keyboard pass:** covered by E2E (the `L` shortcut, focus moving to the invalid field), not by
+  a separate manual pass.
+
 **Goal:** the highest-leverage changes to the daily "what do I study, log it, see progress" loop.
 
 1. **U-8 + C-9 follow-through: field-level errors.** Add a small `useFormErrors(apiError)` helper

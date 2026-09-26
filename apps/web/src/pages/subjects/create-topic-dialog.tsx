@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { topicResponseSchema, type Algorithm, type CreateTopicRequest } from '@topicmatrix/shared';
-import { apiFetch, ApiError } from '../../lib/api-client';
+import {
+  createTopicRequestSchema,
+  topicResponseSchema,
+  type Algorithm,
+  type CreateTopicRequest,
+} from '@topicmatrix/shared';
+import { apiFetch } from '../../lib/api-client';
+import { useFormErrors } from '../../lib/form-errors';
+import { FieldError, FormError } from '../../components/field-error';
 import { invalidations } from '../../lib/invalidations';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -37,44 +44,41 @@ interface Props {
 export function CreateTopicDialog({ subjectId, parentId, open, onOpenChange }: Props): React.JSX.Element {
   const [name, setName] = useState('');
   const [algorithmOverride, setAlgorithmOverride] = useState<Algorithm | 'inherit'>('inherit');
-  const [error, setError] = useState<string | null>(null);
+  const form = useFormErrors();
+  const { clear: clearErrors } = form;
 
   useEffect(() => {
     if (!open) return;
     setName('');
     setAlgorithmOverride('inherit');
-    setError(null);
-  }, [open]);
+    clearErrors();
+  }, [open, clearErrors]);
 
   const createMutation = useMutation({
-    mutationFn: () => {
-      const body: CreateTopicRequest = {
-        subjectId,
-        parentId,
-        name,
-        algorithmOverride: algorithmOverride === 'inherit' ? null : algorithmOverride,
-      };
-      return apiFetch('/topics', topicResponseSchema, { method: 'POST', body });
-    },
+    mutationFn: (body: CreateTopicRequest) => apiFetch('/topics', topicResponseSchema, { method: 'POST', body }),
     onSuccess: async () => {
       await invalidations.afterTopicWrite(subjectId);
       onOpenChange(false);
     },
-    onError: (err) => {
-      setError(err instanceof ApiError ? err.message : 'Could not create topic');
-    },
+    onError: (err) => form.setFromApi(err, 'Could not create topic'),
   });
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    setError(null);
-    createMutation.mutate();
+    const body: CreateTopicRequest = {
+      subjectId,
+      parentId,
+      name,
+      algorithmOverride: algorithmOverride === 'inherit' ? null : algorithmOverride,
+    };
+    if (!form.validate(createTopicRequestSchema, body)) return;
+    createMutation.mutate(body);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <DialogHeader>
             <DialogTitle>{parentId ? 'New sub-topic' : 'New topic'}</DialogTitle>
             <DialogDescription>
@@ -91,7 +95,9 @@ export function CreateTopicDialog({ subjectId, parentId, open, onOpenChange }: P
                 maxLength={120}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                {...form.fieldProps('name', 'topic-name')}
               />
+              <FieldError inputId="topic-name" message={form.errors.name} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="topic-algorithm">Algorithm</Label>
@@ -112,11 +118,7 @@ export function CreateTopicDialog({ subjectId, parentId, open, onOpenChange }: P
                 </SelectContent>
               </Select>
             </div>
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
+            <FormError message={form.formError} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

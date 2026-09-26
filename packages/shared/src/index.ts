@@ -204,6 +204,7 @@ export {
   userSettingsResponseSchema,
   settingsPreviewRequestSchema,
   settingsPreviewResponseSchema,
+  scoringSampleSchema,
 } from './settings.js';
 export type {
   UpdateUserSettingsRequest,
@@ -211,4 +212,5 @@ export type {
   UserSettingsResponse,
   SettingsPreviewRequest,
   SettingsPreviewResponse,
+  ScoringSampleView,
 } from './settings.js';

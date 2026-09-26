@@ -46,6 +46,9 @@ export function registerReviewRoutes(app: Hono<AppEnv>): void {
       overdue: buckets.overdue.map(toItemView),
       dueToday: buckets.dueToday.map(toItemView),
       dueNext7Days: buckets.dueNext7Days.map(toItemView),
+      notStarted: buckets.notStarted.map(toItemView),
+      notStartedTotal: buckets.notStartedTotal,
+      nextReviewOn: buckets.nextReviewOn,
     });
   });
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidTimezone } from './date.js';
 
 // Known placeholder secrets that must never be accepted, even if 32+ chars (SEC-5).
 const PLACEHOLDER_SECRETS = new Set([
@@ -29,6 +30,12 @@ const envSchema = z.object({
   // trusted (e.g. 1 for the docker-compose nginx). 0 = use the socket address only, since a
   // client can put anything in X-Forwarded-For when nothing trusted rewrites it.
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+  // Timezone new accounts start with (users can change theirs in Settings, and are offered their
+  // device's timezone on first login if it differs).
+  DEFAULT_TIMEZONE: z
+    .string()
+    .refine(isValidTimezone, { message: 'DEFAULT_TIMEZONE must be a valid IANA timezone' })
+    .default('Europe/London'),
 });
 
 export type RawEnv = Record<string, string | undefined>;
@@ -44,6 +51,7 @@ export interface AppConfig {
   argon2Iterations: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   trustProxyHops: number;
+  defaultTimezone: string;
 }
 
 export class ConfigError extends Error {
@@ -87,5 +95,6 @@ export function parseConfig(env: RawEnv): AppConfig {
     argon2Iterations: data.ARGON2_ITERATIONS,
     logLevel: data.LOG_LEVEL,
     trustProxyHops: data.TRUST_PROXY_HOPS,
+    defaultTimezone: data.DEFAULT_TIMEZONE,
   };
 }

@@ -2,8 +2,10 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Copy } from 'lucide-react';
-import { adminCreateUserResponseSchema } from '@topicmatrix/shared';
-import { apiFetch, ApiError } from '../../lib/api-client';
+import { adminCreateUserRequestSchema, adminCreateUserResponseSchema } from '@topicmatrix/shared';
+import { apiFetch } from '../../lib/api-client';
+import { useFormErrors } from '../../lib/form-errors';
+import { FieldError, FormError } from '../../components/field-error';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
 import { Button } from '../../components/ui/button';
@@ -28,28 +30,23 @@ interface Props {
 export function CreateUserDialog({ open, onOpenChange }: Props): React.JSX.Element {
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const form = useFormErrors();
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      apiFetch('/admin/users', adminCreateUserResponseSchema, {
-        method: 'POST',
-        body: { email, displayName },
-      }),
+    mutationFn: (body: { email: string; displayName: string }) =>
+      apiFetch('/admin/users', adminCreateUserResponseSchema, { method: 'POST', body }),
     onSuccess: async (data) => {
       await invalidations.afterAdminUserCreate();
       setTemporaryPassword(data.temporaryPassword);
     },
-    onError: (err) => {
-      setError(err instanceof ApiError ? err.message : 'Could not create user');
-    },
+    onError: (err) => form.setFromApi(err, 'Could not create user'),
   });
 
   const reset = () => {
     setEmail('');
     setDisplayName('');
-    setError(null);
+    form.clear();
     setTemporaryPassword(null);
   };
 
@@ -60,8 +57,9 @@ export function CreateUserDialog({ open, onOpenChange }: Props): React.JSX.Eleme
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    setError(null);
-    createMutation.mutate();
+    const body = { email, displayName };
+    if (!form.validate(adminCreateUserRequestSchema, body)) return;
+    createMutation.mutate(body);
   };
 
   const copyPassword = async () => {
@@ -92,7 +90,7 @@ export function CreateUserDialog({ open, onOpenChange }: Props): React.JSX.Eleme
             </DialogFooter>
           </>
         ) : (
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate>
             <DialogHeader>
               <DialogTitle>New user</DialogTitle>
               <DialogDescription>
@@ -109,7 +107,9 @@ export function CreateUserDialog({ open, onOpenChange }: Props): React.JSX.Eleme
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  {...form.fieldProps('email', 'new-user-email')}
                 />
+                <FieldError inputId="new-user-email" message={form.errors.email} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="new-user-name">Display name</Label>
@@ -118,13 +118,11 @@ export function CreateUserDialog({ open, onOpenChange }: Props): React.JSX.Eleme
                   required
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
+                  {...form.fieldProps('displayName', 'new-user-name')}
                 />
+                <FieldError inputId="new-user-name" message={form.errors.displayName} />
               </div>
-              {error ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
-              ) : null}
+              <FormError message={form.formError} />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>

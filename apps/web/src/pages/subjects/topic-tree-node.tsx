@@ -17,7 +17,7 @@ import { topicResponseSchema, type TopicTreeNodeView } from '@topicmatrix/shared
 import { apiFetch } from '../../lib/api-client';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
 import { cn } from '../../lib/utils';
 import { HealthStatusBadge, type HealthStatus } from '../../components/health-status-badge';
 import { Badge } from '../../components/ui/badge';
@@ -29,17 +29,20 @@ const DEPTH_WARNING_THRESHOLD = 6;
 
 interface IconButtonProps {
   label: string;
+  /** The topic the action applies to — every row repeats the same buttons, so the accessible
+   * name says which row ("Log session: Algebra"); the tooltip keeps the short label. */
+  topicName: string;
   onClick: () => void;
   children: React.ReactNode;
 }
 
-function IconButton({ label, onClick, children }: IconButtonProps): React.JSX.Element {
+function IconButton({ label, topicName, onClick, children }: IconButtonProps): React.JSX.Element {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label={label}
+          aria-label={`${label}: ${topicName}`}
           onClick={onClick}
           className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         >
@@ -206,25 +209,25 @@ export function TopicTreeNodeRow(props: TopicTreeNodeRowProps): React.JSX.Elemen
         </span>
 
         <div className="ml-1 flex shrink-0 items-center gap-0.5">
-          <IconButton label="Move up" onClick={() => onReorder(node, siblings, index, 'up')}>
+          <IconButton topicName={node.name} label="Move up" onClick={() => onReorder(node, siblings, index, 'up')}>
             <MoveVertical className="size-4 rotate-180" aria-hidden="true" />
           </IconButton>
-          <IconButton label="Move down" onClick={() => onReorder(node, siblings, index, 'down')}>
+          <IconButton topicName={node.name} label="Move down" onClick={() => onReorder(node, siblings, index, 'down')}>
             <MoveVertical className="size-4" aria-hidden="true" />
           </IconButton>
-          <IconButton label="Log session" onClick={() => onLogSession(node)}>
+          <IconButton topicName={node.name} label="Log session" onClick={() => onLogSession(node)}>
             <ListChecks className="size-4" aria-hidden="true" />
           </IconButton>
-          <IconButton label="Add sub-topic" onClick={() => onAddChild(node.id)}>
+          <IconButton topicName={node.name} label="Add sub-topic" onClick={() => onAddChild(node.id)}>
             <FolderPlus className="size-4" aria-hidden="true" />
           </IconButton>
-          <IconButton label="Rename" onClick={() => setRenaming(true)}>
+          <IconButton topicName={node.name} label="Rename" onClick={() => setRenaming(true)}>
             <Pencil className="size-4" aria-hidden="true" />
           </IconButton>
-          <IconButton label="Move to…" onClick={() => onMove(node)}>
+          <IconButton topicName={node.name} label="Move to…" onClick={() => onMove(node)}>
             <ChevronRight className="size-4" aria-hidden="true" />
           </IconButton>
-          <IconButton label="Delete" onClick={() => onDelete(node)}>
+          <IconButton topicName={node.name} label="Delete" onClick={() => onDelete(node)}>
             <Trash2 className="size-4" aria-hidden="true" />
           </IconButton>
         </div>

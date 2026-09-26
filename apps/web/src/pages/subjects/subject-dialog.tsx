@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import {
+  createSubjectRequestSchema,
   subjectResponseSchema,
   type Algorithm,
   type CreateSubjectRequest,
   type SubjectView,
 } from '@topicmatrix/shared';
-import { apiFetch, ApiError } from '../../lib/api-client';
+import { apiFetch } from '../../lib/api-client';
+import { useFormErrors } from '../../lib/form-errors';
+import { FieldError, FormError } from '../../components/field-error';
 import { invalidations } from '../../lib/invalidations';
 import { toastSchedulesChanged } from '../../lib/toast-store';
 import { cn } from '../../lib/utils';
@@ -48,7 +51,8 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
   const [colour, setColour] = useState<string | null>(null);
   const [icon, setIcon] = useState<string | null>(null);
   const [defaultAlgorithm, setDefaultAlgorithm] = useState<Algorithm | 'inherit'>('inherit');
-  const [error, setError] = useState<string | null>(null);
+  const form = useFormErrors();
+  const { clear: clearErrors } = form;
 
   useEffect(() => {
     if (!open) return;
@@ -57,18 +61,11 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
     setColour(subject?.colour ?? null);
     setIcon(subject?.icon ?? null);
     setDefaultAlgorithm(subject?.defaultAlgorithm ?? 'inherit');
-    setError(null);
-  }, [open, subject?.id]);
+    clearErrors();
+  }, [open, subject?.id, clearErrors]);
 
   const saveMutation = useMutation({
-    mutationFn: () => {
-      const body: CreateSubjectRequest = {
-        name,
-        description: description.trim().length > 0 ? description : null,
-        colour,
-        icon,
-        defaultAlgorithm: defaultAlgorithm === 'inherit' ? null : defaultAlgorithm,
-      };
+    mutationFn: (body: CreateSubjectRequest) => {
       return subject !== null
         ? apiFetch(`/subjects/${subject.id}`, subjectResponseSchema, { method: 'PATCH', body })
         : apiFetch('/subjects', subjectResponseSchema, { method: 'POST', body });
@@ -78,21 +75,26 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
       toastSchedulesChanged(data.schedulesChanged);
       onOpenChange(false);
     },
-    onError: (err) => {
-      setError(err instanceof ApiError ? err.message : 'Could not save subject');
-    },
+    onError: (err) => form.setFromApi(err, 'Could not save subject'),
   });
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    setError(null);
-    saveMutation.mutate();
+    const body: CreateSubjectRequest = {
+      name,
+      description: description.trim().length > 0 ? description : null,
+      colour,
+      icon,
+      defaultAlgorithm: defaultAlgorithm === 'inherit' ? null : defaultAlgorithm,
+    };
+    if (!form.validate(createSubjectRequestSchema, body)) return;
+    saveMutation.mutate(body);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <DialogHeader>
             <DialogTitle>{isEdit ? 'Edit subject' : 'New subject'}</DialogTitle>
             <DialogDescription>
@@ -108,7 +110,9 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
                 maxLength={120}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                {...form.fieldProps('name', 'subject-name')}
               />
+              <FieldError inputId="subject-name" message={form.errors.name} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="subject-description">Description</Label>
@@ -118,7 +122,9 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
                 rows={2}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
+                {...form.fieldProps('description', 'subject-description')}
               />
+              <FieldError inputId="subject-description" message={form.errors.description} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Colour</Label>
@@ -202,11 +208,7 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
                 </SelectContent>
               </Select>
             </div>
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
+            <FormError message={form.formError} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

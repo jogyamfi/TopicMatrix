@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { sessionResponseSchema, type StudySessionView } from '@topicmatrix/shared';
-import { apiFetch, ApiError } from '../../lib/api-client';
+import { sessionResponseSchema, updateStudySessionRequestSchema, type StudySessionView } from '@topicmatrix/shared';
+import { apiFetch } from '../../lib/api-client';
+import { useFormErrors } from '../../lib/form-errors';
+import { FieldError, FormError } from '../../components/field-error';
 import { invalidations } from '../../lib/invalidations';
 import { useUserToday } from '../../lib/use-user-today';
 import { ConfidenceScale } from '../../components/confidence-scale';
@@ -40,7 +42,8 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
   const [confidence, setConfidence] = useState(3);
   const [durationMinutes, setDurationMinutes] = useState('');
   const [notes, setNotes] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const form = useFormErrors();
+  const { clear: clearErrors } = form;
 
   useEffect(() => {
     if (!session) return;
@@ -51,45 +54,40 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
     setConfidence(session.confidence);
     setDurationMinutes(session.durationMinutes !== null ? String(session.durationMinutes) : '');
     setNotes(session.notes ?? '');
-    setError(null);
-  }, [session?.id]);
+    clearErrors();
+  }, [session?.id, clearErrors]);
 
   const saveMutation = useMutation({
-    mutationFn: () => {
-      const attempted = Number.parseInt(questionsAttempted, 10);
-      const correct = Number.parseInt(questionsCorrect, 10);
-      // Wire format is pre-transform (studiedOn as a plain string) — see log-session-dialog.tsx's
-      // identical note.
-      const body = {
-        studiedOn,
-        sourceLabel: sourceLabel.trim().length > 0 ? sourceLabel : null,
-        questionsAttempted: attempted,
-        questionsCorrect: correct,
-        confidence,
-        durationMinutes: durationMinutes.trim().length > 0 ? Number.parseInt(durationMinutes, 10) : null,
-        notes: notes.trim().length > 0 ? notes : null,
-      };
-      return apiFetch(`/sessions/${session?.id}`, sessionResponseSchema, { method: 'PATCH', body });
-    },
+    // Wire format is pre-transform (studiedOn as a plain string) — see log-session-dialog.tsx's
+    // identical note.
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch(`/sessions/${session?.id}`, sessionResponseSchema, { method: 'PATCH', body }),
     onSuccess: async () => {
       if (session) await invalidations.afterSessionWrite(subjectId, session.topicId);
       onOpenChange(false);
     },
-    onError: (err) => {
-      setError(err instanceof ApiError ? err.message : 'Could not save session');
-    },
+    onError: (err) => form.setFromApi(err, 'Could not save session'),
   });
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    setError(null);
-    saveMutation.mutate();
+    const body = {
+      studiedOn,
+      sourceLabel: sourceLabel.trim().length > 0 ? sourceLabel : null,
+      questionsAttempted: Number.parseInt(questionsAttempted, 10),
+      questionsCorrect: Number.parseInt(questionsCorrect, 10),
+      confidence,
+      durationMinutes: durationMinutes.trim().length > 0 ? Number.parseInt(durationMinutes, 10) : null,
+      notes: notes.trim().length > 0 ? notes : null,
+    };
+    if (!form.validate(updateStudySessionRequestSchema, body)) return;
+    saveMutation.mutate(body);
   };
 
   return (
     <Dialog open={session !== null} onOpenChange={onOpenChange}>
       <DialogContent>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <DialogHeader>
             <DialogTitle>Edit session</DialogTitle>
             <DialogDescription>Saving recalculates this topic's schedule and score.</DialogDescription>
@@ -98,11 +96,26 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-session-date">Date</Label>
-                <Input id="edit-session-date" type="date" required max={today} value={studiedOn} onChange={(e) => setStudiedOn(e.target.value)} />
+                <Input
+                  id="edit-session-date"
+                  type="date"
+                  required
+                  max={today}
+                  value={studiedOn}
+                  onChange={(e) => setStudiedOn(e.target.value)}
+                  {...form.fieldProps('studiedOn', 'edit-session-date')}
+                />
+                <FieldError inputId="edit-session-date" message={form.errors.studiedOn} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-session-source">Source</Label>
-                <Input id="edit-session-source" value={sourceLabel} onChange={(e) => setSourceLabel(e.target.value)} />
+                <Input
+                  id="edit-session-source"
+                  value={sourceLabel}
+                  onChange={(e) => setSourceLabel(e.target.value)}
+                  {...form.fieldProps('sourceLabel', 'edit-session-source')}
+                />
+                <FieldError inputId="edit-session-source" message={form.errors.sourceLabel} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -115,7 +128,9 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
                   required
                   value={questionsAttempted}
                   onChange={(e) => setQuestionsAttempted(e.target.value)}
+                  {...form.fieldProps('questionsAttempted', 'edit-session-attempted')}
                 />
+                <FieldError inputId="edit-session-attempted" message={form.errors.questionsAttempted} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-session-correct">Questions correct</Label>
@@ -126,7 +141,9 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
                   required
                   value={questionsCorrect}
                   onChange={(e) => setQuestionsCorrect(e.target.value)}
+                  {...form.fieldProps('questionsCorrect', 'edit-session-correct')}
                 />
+                <FieldError inputId="edit-session-correct" message={form.errors.questionsCorrect} />
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -141,17 +158,22 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
                 min={0}
                 value={durationMinutes}
                 onChange={(e) => setDurationMinutes(e.target.value)}
+                {...form.fieldProps('durationMinutes', 'edit-session-duration')}
               />
+              <FieldError inputId="edit-session-duration" message={form.errors.durationMinutes} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="edit-session-notes">Notes</Label>
-              <Textarea id="edit-session-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <Textarea
+                id="edit-session-notes"
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                {...form.fieldProps('notes', 'edit-session-notes')}
+              />
+              <FieldError inputId="edit-session-notes" message={form.errors.notes} />
             </div>
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
+            <FormError message={form.formError} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

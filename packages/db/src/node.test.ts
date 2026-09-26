@@ -14,6 +14,7 @@ function config(databaseUrl: string): AppConfig {
     argon2Iterations: 2,
     logLevel: 'error',
     trustProxyHops: 0,
+    defaultTimezone: 'Europe/London',
   };
 }
 

@@ -4,8 +4,7 @@
 // module always uses the user's *stored* settings, whereas this one needs to score the same
 // topic twice, once under the stored weights and once under the caller-supplied proposed ones.
 import { AppError, startOfUserDay } from '@topicmatrix/shared';
-import { computeCompetencyScore, computeHealthStatus, daysBetween } from '@topicmatrix/core';
-import type { ScoringWeights } from '@topicmatrix/core';
+import { daysBetween, scoreSample, type ScoringSample, type ScoringWeights } from '@topicmatrix/core';
 import type { Db } from './db.js';
 
 export interface SettingsPreviewWeightsAndThresholds extends ScoringWeights {
@@ -21,6 +20,8 @@ export interface SettingsPreviewSide {
 export interface SettingsPreviewResult {
   readonly topicId: string;
   readonly topicName: string;
+  /** The sample's scoring inputs, for re-scoring proposed settings client-side. */
+  readonly sample: ScoringSample;
   readonly current: SettingsPreviewSide;
   readonly proposed: SettingsPreviewSide;
 }
@@ -48,13 +49,10 @@ export async function computeSettingsPreview(
   proposed: SettingsPreviewWeightsAndThresholds,
   topicId?: string,
 ): Promise<SettingsPreviewResult | null> {
-  const settingsRow = await db.userSettings.find(userId);
-  if (!settingsRow) {
+  const settings = await db.userSettings.find(userId);
+  if (!settings) {
     throw new AppError('NOT_FOUND', 'User settings not found');
   }
-  // Captured into its own const, not just narrowed in this scope: a nested function declared
-  // below (`scoreWith`) does not inherit `if (!x) throw` narrowing from an enclosing scope.
-  const settings = settingsRow;
 
   const resolvedTopicId = topicId ?? (await findSampleTopicId(db, userId));
   if (!resolvedTopicId) {
@@ -82,43 +80,33 @@ export async function computeSettingsPreview(
   }
   const daysSinceLastSession = lastSessionOn ? daysBetween(lastSessionOn, asOfDate) : null;
 
-  function scoreWith(weightsAndThresholds: SettingsPreviewWeightsAndThresholds): SettingsPreviewSide {
-    const result = computeCompetencyScore({
-      sessions: sessions.map((s) => ({
-        studiedOn: s.studiedOn,
-        questionsAttempted: s.questionsAttempted,
-        accuracy: s.accuracy,
-        confidence: s.confidence,
-      })),
-      asOfDate,
-      currentIntervalDays: schedule?.intervalDays ?? null,
-      weights: {
-        accuracy: weightsAndThresholds.accuracy,
-        confidence: weightsAndThresholds.confidence,
-        recency: weightsAndThresholds.recency,
-      },
-    });
-    const healthStatus = computeHealthStatus({
-      score: result.score,
-      overdueDays,
-      daysSinceLastSession,
-      strongThreshold: weightsAndThresholds.strongThreshold,
-      needsReviewThreshold: weightsAndThresholds.needsReviewThreshold,
-      neglectThresholdDays: settings.neglectThresholdDays,
-    });
-    return { score: result.score, healthStatus };
-  }
+  // Every input scoring needs, frozen now — returned to the client too, so it can re-score this
+  // same sample under each proposed setting locally (R3 P-2) instead of a request per keystroke.
+  const sample: ScoringSample = {
+    sessions: sessions.map((s) => ({
+      studiedOn: s.studiedOn,
+      questionsAttempted: s.questionsAttempted,
+      accuracy: s.accuracy,
+      confidence: s.confidence,
+    })),
+    asOfDate,
+    currentIntervalDays: schedule?.intervalDays ?? null,
+    overdueDays,
+    daysSinceLastSession,
+    neglectThresholdDays: settings.neglectThresholdDays,
+  };
 
   return {
     topicId: topic.id,
     topicName: topic.name,
-    current: scoreWith({
+    sample,
+    current: scoreSample(sample, {
       accuracy: settings.weightAccuracy,
       confidence: settings.weightConfidence,
       recency: settings.weightRecency,
       strongThreshold: settings.strongThreshold,
       needsReviewThreshold: settings.needsReviewThreshold,
     }),
-    proposed: scoreWith(proposed),
+    proposed: scoreSample(sample, proposed),
   };
 }

@@ -8,5 +8,5 @@
     "types": []
   },
   "include": ["src"],
-  "references": [{ "path": "../../packages/shared" }]
+  "references": [{ "path": "../../packages/core" }, { "path": "../../packages/shared" }]
 }

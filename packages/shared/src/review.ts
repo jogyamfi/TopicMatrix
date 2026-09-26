@@ -23,6 +23,11 @@ export const reviewQueueResponseSchema = z.object({
   overdue: z.array(reviewQueueItemSchema),
   dueToday: z.array(reviewQueueItemSchema),
   dueNext7Days: z.array(reviewQueueItemSchema),
+  /** Never-studied topics, oldest first, capped (see `notStartedTotal`) — not due, but a place to start. */
+  notStarted: z.array(reviewQueueItemSchema),
+  notStartedTotal: z.number().int(),
+  /** Earliest upcoming review after today, or null — for "nothing due; next review on …". */
+  nextReviewOn: z.string().nullable(),
 });
 export type ReviewQueueResponse = z.infer<typeof reviewQueueResponseSchema>;
 

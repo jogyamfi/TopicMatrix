@@ -14,6 +14,15 @@ describe('parseConfig', () => {
     expect(config.port).toBe(3000);
     expect(config.nodeEnv).toBe('development');
     expect(config.logLevel).toBe('info');
+    expect(config.defaultTimezone).toBe('Europe/London');
+    expect(config.trustProxyHops).toBe(0);
+  });
+
+  it('accepts a valid DEFAULT_TIMEZONE and rejects an unknown one', () => {
+    expect(parseConfig({ ...validEnv, DEFAULT_TIMEZONE: 'America/New_York' }).defaultTimezone).toBe(
+      'America/New_York',
+    );
+    expect(() => parseConfig({ ...validEnv, DEFAULT_TIMEZONE: 'Mars/Olympus_Mons' })).toThrow(ConfigError);
   });
 
   it('fails closed when JWT_SECRET is missing', () => {

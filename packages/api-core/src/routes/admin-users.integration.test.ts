@@ -153,6 +153,22 @@ describe('admin user-management routes', () => {
     expect(await ctx.db.users.findById(created.user.id)).toBeNull();
   });
 
+  it("gives a new account the deployment's DEFAULT_TIMEZONE", async () => {
+    const nyCtx = await setupApiTest({ configOverrides: { defaultTimezone: 'America/New_York' } });
+    try {
+      const { accessToken } = await createLoggedInUser(nyCtx, 'ADMIN');
+      const res = await nyCtx.app.request('/admin/users', {
+        method: 'POST',
+        headers: { ...authed(accessToken), 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'ny@example.com', displayName: 'New Yorker' }),
+      });
+      const { user } = await readJson<CreateUserResponseBody>(res);
+      expect((await nyCtx.db.userSettings.find(user.id))?.timezone).toBe('America/New_York');
+    } finally {
+      await nyCtx.teardown();
+    }
+  });
+
   it('rejects creating a user with an email that already exists', async () => {
     const { accessToken: adminToken } = await createLoggedInUser(ctx, 'ADMIN');
     const existing = await ctx.fixtures.createUser({ email: 'dup@example.com' });

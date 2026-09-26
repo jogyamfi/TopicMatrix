@@ -8,7 +8,7 @@ import { reviewScheduleViewSchema } from './schedule.js';
 // when omitted, the route defaults it to the user's current day (FR-5.9's day-start-hour rule).
 
 const questionsCorrectWithinAttempted: { message: string; path: (string | number)[] } = {
-  message: 'questionsCorrect cannot exceed questionsAttempted',
+  message: 'Questions correct cannot be more than questions attempted',
   path: ['questionsCorrect'],
 };
 

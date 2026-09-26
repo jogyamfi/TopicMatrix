@@ -8,6 +8,7 @@ import { useRouteFocus } from '../../lib/use-route-focus';
 import { Sidebar } from './sidebar';
 import { MobileNav } from './mobile-nav';
 import { Breadcrumbs } from './breadcrumbs';
+import { TimezoneBanner } from '../timezone-banner';
 
 /** The responsive app shell (P6 task 7): sidebar on desktop, drawer on mobile, a header slot
  * (breadcrumbs + theme + user menu), and a global error boundary wrapping every routed page. */
@@ -31,6 +32,8 @@ export function AppShell(): React.JSX.Element | null {
             <UserMenu />
           </div>
         </header>
+        {/* Settings are off-limits until a forced password change is done (FR-1.6). */}
+        {user.mustChangePassword ? null : <TimezoneBanner userId={user.id} />}
         <main
           id="main-content"
           ref={focusRef}
