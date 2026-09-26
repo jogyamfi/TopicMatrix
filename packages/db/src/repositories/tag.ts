@@ -11,6 +11,12 @@ export interface TagRepository {
   list(userId: string, opts?: { skip?: number; take?: number }): Promise<Tag[]>;
   findById(userId: string, tagId: string): Promise<Tag | null>;
   create(userId: string, name: string): Promise<Tag>;
+  /** Renames a tag, keeping names unique per user (case-insensitively, like `create`). */
+  rename(userId: string, tagId: string, name: string): Promise<Tag>;
+  /**
+   * Deletes a tag and its topic attachments (TopicTag has `onDelete: Restrict`). Two statements —
+   * call it inside a UnitOfWork (`deleteTag` in tag-writes.ts) so they commit together.
+   */
   delete(userId: string, tagId: string): Promise<void>;
   listForTopic(userId: string, topicId: string): Promise<Tag[]>;
   /** Cross-subject filtering (FR-3.9) — every topic (in any subject) tagged with this tag. */
@@ -56,8 +62,18 @@ export function createTagRepository(client: PrismaClientOrTx): TagRepository {
       }
       return client.tag.create({ data: { userId, name, nameNormalised } });
     },
+    rename: async (userId, tagId, name) => {
+      await assertTagOwned(userId, tagId);
+      const nameNormalised = normaliseKey(name);
+      const conflict = await client.tag.findFirst({ where: { userId, nameNormalised, NOT: { id: tagId } } });
+      if (conflict) {
+        throw new AppError('CONFLICT', 'A tag with this name already exists');
+      }
+      return client.tag.update({ where: { id: tagId }, data: { name, nameNormalised } });
+    },
     delete: async (userId, tagId) => {
       await assertTagOwned(userId, tagId);
+      await client.topicTag.deleteMany({ where: { tagId } });
       await client.tag.delete({ where: { id: tagId } });
     },
     listForTopic: async (userId, topicId) => {

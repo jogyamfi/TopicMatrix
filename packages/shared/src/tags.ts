@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { topicMetricsSchema } from './topics.js';
+import { healthStatusSchema } from './domain.js';
 
 // Single source of truth for Tag request shapes (P4, FR-3.9).
 
@@ -22,16 +22,22 @@ export type TagsListResponse = z.infer<typeof tagsListResponseSchema>;
 export const tagResponseSchema = z.object({ tag: tagViewSchema });
 export type TagResponse = z.infer<typeof tagResponseSchema>;
 
-// Cross-subject tag filter (FR-3.9) — a lightweight topic summary, not the full TopicView.
-export const topicSummaryViewSchema = z.object({
+// PATCH /tags/:id (R4) — rename; same rules as create.
+export const renameTagRequestSchema = createTagRequestSchema;
+export type RenameTagRequest = z.infer<typeof renameTagRequestSchema>;
+
+// Cross-subject tag filter (FR-3.9): each tagged topic with its live score and health (R4 —
+// previously placeholder metrics), from the same computation as the Topic Health View.
+export const taggedTopicViewSchema = z.object({
   id: z.string(),
   subjectId: z.string(),
-  parentId: z.string().nullable(),
+  subjectName: z.string(),
   name: z.string(),
-  depth: z.number(),
-  metrics: topicMetricsSchema,
+  score: z.number().nullable(),
+  healthStatus: healthStatusSchema,
+  nextReviewOn: z.string().nullable(),
 });
-export type TopicSummaryView = z.infer<typeof topicSummaryViewSchema>;
+export type TaggedTopicView = z.infer<typeof taggedTopicViewSchema>;
 
-export const topicsForTagResponseSchema = z.object({ topics: z.array(topicSummaryViewSchema) });
+export const topicsForTagResponseSchema = z.object({ topics: z.array(taggedTopicViewSchema) });
 export type TopicsForTagResponse = z.infer<typeof topicsForTagResponseSchema>;

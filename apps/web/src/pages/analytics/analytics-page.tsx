@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   subjectsListResponseSchema,
@@ -8,6 +8,7 @@ import {
   topicHealthResponseSchema,
   retentionResponseSchema,
   accuracyConfidenceResponseSchema,
+  type TopicSearchResult,
 } from '@topicmatrix/shared';
 import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
@@ -25,6 +26,9 @@ import { TopicHeatmapGrid } from '../../components/charts/topic-heatmap-grid';
 import { RetentionCurveChart } from '../../components/charts/retention-curve-chart';
 import { AccuracyConfidenceChart } from '../../components/charts/accuracy-confidence-chart';
 import { TopicHealthTable } from './topic-health-table';
+import { TopicCombobox, topicLocation } from '../../components/topic-search';
+import { Button } from '../../components/ui/button';
+import { Label } from '../../components/ui/label';
 
 const ALL_SUBJECTS = 'all';
 const WHOLE_SUBJECT = 'whole-subject';
@@ -127,11 +131,46 @@ function HealthViewTab({ subjectId }: { subjectId: string }): React.JSX.Element 
   return <TopicHealthTable topics={query.data.topics} />;
 }
 
+/** "All subjects" on a per-topic chart: search for any topic instead of picking a subject first. */
+function AnyTopicPicker({ onPick, what }: { onPick: (topic: TopicSearchResult) => void; what: string }): React.JSX.Element {
+  const id = useId();
+  return (
+    <div className="flex max-w-md flex-col gap-1.5">
+      <Label htmlFor={id}>Topic</Label>
+      <p className="text-sm text-muted-foreground">
+        Search for a topic in any subject to see {what}, or choose a subject above for a whole-subject view.
+      </p>
+      <TopicCombobox id={id} onSelect={onPick} />
+    </div>
+  );
+}
+
+function PickedTopic({ topic, onClear }: { topic: TopicSearchResult; onClear: () => void }): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm">
+      <span className="min-w-0">
+        <span className="font-medium">{topic.name}</span>{' '}
+        <span className="text-xs text-muted-foreground">({topicLocation(topic)})</span>
+      </span>
+      <Button type="button" variant="ghost" size="sm" onClick={onClear}>
+        Change
+      </Button>
+    </div>
+  );
+}
+
 function RetentionTab({ subjectId }: { subjectId: string | null }): React.JSX.Element {
   const [topicId, setTopicId] = useState<string>(WHOLE_SUBJECT);
+  // With "All subjects" selected, any topic can be picked by search instead (R4, U-11).
+  const [pickedTopic, setPickedTopic] = useState<TopicSearchResult | null>(null);
   const [range, setRange] = useState<DateRangePreset>('90');
   const topicsQuery = useTopics(subjectId);
-  const target = topicId === WHOLE_SUBJECT ? { subjectId: subjectId ?? '' } : { topicId };
+  const target =
+    subjectId === null
+      ? { topicId: pickedTopic?.id ?? '' }
+      : topicId === WHOLE_SUBJECT
+        ? { subjectId }
+        : { topicId };
   const today = useUserToday();
   const { from, to } = resolveDateRange(range, today);
 
@@ -145,29 +184,33 @@ function RetentionTab({ subjectId }: { subjectId: string | null }): React.JSX.El
       });
       return apiFetch(`/analytics/retention?${params.toString()}`, retentionResponseSchema);
     },
-    enabled: subjectId !== null,
+    enabled: subjectId !== null || pickedTopic !== null,
   });
 
-  if (!subjectId) {
-    return <EmptyState title="Pick a subject" description="Choose a subject above to see its retention curve." />;
+  if (!subjectId && !pickedTopic) {
+    return <AnyTopicPicker onPick={setPickedTopic} what="its retention curve" />;
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={topicId} onValueChange={setTopicId}>
-          <SelectTrigger className="w-56" aria-label="Topic">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={WHOLE_SUBJECT}>Whole subject</SelectItem>
-            {(topicsQuery.data?.topics ?? []).map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {subjectId === null && pickedTopic ? (
+          <PickedTopic topic={pickedTopic} onClear={() => setPickedTopic(null)} />
+        ) : (
+          <Select value={topicId} onValueChange={setTopicId}>
+            <SelectTrigger className="w-56" aria-label="Topic">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={WHOLE_SUBJECT}>Whole subject</SelectItem>
+              {(topicsQuery.data?.topics ?? []).map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <DateRangeSelector value={range} onChange={setRange} />
       </div>
       {query.isPending ? (
@@ -188,9 +231,16 @@ function RetentionTab({ subjectId }: { subjectId: string | null }): React.JSX.El
 
 function AccuracyConfidenceTab({ subjectId }: { subjectId: string | null }): React.JSX.Element {
   const [topicId, setTopicId] = useState<string>(WHOLE_SUBJECT);
+  // With "All subjects" selected, any topic can be picked by search instead (R4, U-11).
+  const [pickedTopic, setPickedTopic] = useState<TopicSearchResult | null>(null);
   const [range, setRange] = useState<DateRangePreset>('90');
   const topicsQuery = useTopics(subjectId);
-  const target = topicId === WHOLE_SUBJECT ? { subjectId: subjectId ?? '' } : { topicId };
+  const target =
+    subjectId === null
+      ? { topicId: pickedTopic?.id ?? '' }
+      : topicId === WHOLE_SUBJECT
+        ? { subjectId }
+        : { topicId };
   const today = useUserToday();
   const { from, to } = resolveDateRange(range, today);
 
@@ -204,29 +254,33 @@ function AccuracyConfidenceTab({ subjectId }: { subjectId: string | null }): Rea
       });
       return apiFetch(`/analytics/accuracy-confidence?${params.toString()}`, accuracyConfidenceResponseSchema);
     },
-    enabled: subjectId !== null,
+    enabled: subjectId !== null || pickedTopic !== null,
   });
 
-  if (!subjectId) {
-    return <EmptyState title="Pick a subject" description="Choose a subject above to compare accuracy and confidence." />;
+  if (!subjectId && !pickedTopic) {
+    return <AnyTopicPicker onPick={setPickedTopic} what="accuracy against confidence" />;
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={topicId} onValueChange={setTopicId}>
-          <SelectTrigger className="w-56" aria-label="Topic">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={WHOLE_SUBJECT}>Whole subject</SelectItem>
-            {(topicsQuery.data?.topics ?? []).map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {subjectId === null && pickedTopic ? (
+          <PickedTopic topic={pickedTopic} onClear={() => setPickedTopic(null)} />
+        ) : (
+          <Select value={topicId} onValueChange={setTopicId}>
+            <SelectTrigger className="w-56" aria-label="Topic">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={WHOLE_SUBJECT}>Whole subject</SelectItem>
+              {(topicsQuery.data?.topics ?? []).map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <DateRangeSelector value={range} onChange={setRange} />
       </div>
       {query.isPending ? (

@@ -1,4 +1,4 @@
-import { authResponseSchema, type PublicUser } from '@topicmatrix/shared';
+import { authResponseSchema, type AuthResponse, type PublicUser } from '@topicmatrix/shared';
 import { toApiError } from './api-error';
 import { queryClient } from './query-client';
 import { clearLauncherRun } from './launcher-store';
@@ -142,6 +142,17 @@ class AuthStore {
 
   updateUser(user: PublicUser): void {
     this.setState({ user });
+  }
+
+  /**
+   * Takes over a session the server just issued outside login/refresh — a password change
+   * returns a fresh access token (and sets a fresh refresh cookie) for this browser (R4).
+   */
+  adoptSession(session: AuthResponse): void {
+    this.epoch += 1;
+    this.setState({ accessToken: session.accessToken, user: session.user, status: 'authenticated' });
+    // Other tabs' sessions were just ended by the server; the shared cookie is now this one.
+    this.broadcast({ type: 'signed-in', userId: session.user.id });
   }
 
   /** Rotating refresh (P2) via the HttpOnly cookie. Coalesces concurrent callers into one call. */

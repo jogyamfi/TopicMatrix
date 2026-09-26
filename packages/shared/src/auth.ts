@@ -34,8 +34,9 @@ export const adminUpdateUserRequestSchema = z
   .object({
     displayName: z.string().trim().min(1).max(120).optional(),
     isActive: z.boolean().optional(),
+    role: roleSchema.optional(),
   })
-  .refine((v) => v.displayName !== undefined || v.isActive !== undefined, {
+  .refine((v) => v.displayName !== undefined || v.isActive !== undefined || v.role !== undefined, {
     message: 'At least one field must be provided',
   });
 export type AdminUpdateUserRequest = z.infer<typeof adminUpdateUserRequestSchema>;
@@ -91,4 +92,8 @@ export const adminCreateUserResponseSchema = z.object({
 export type AdminCreateUserResponse = z.infer<typeof adminCreateUserResponseSchema>;
 
 export const adminUpdateUserResponseSchema = z.object({ user: adminUserViewSchema });
+
+// POST /admin/users/:id/reset-password (R4) — a fresh temporary password, shown once.
+export const adminResetPasswordResponseSchema = z.object({ temporaryPassword: z.string() });
+export type AdminResetPasswordResponse = z.infer<typeof adminResetPasswordResponseSchema>;
 export type AdminUpdateUserResponse = z.infer<typeof adminUpdateUserResponseSchema>;
