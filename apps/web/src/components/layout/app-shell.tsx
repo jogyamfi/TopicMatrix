@@ -9,6 +9,7 @@ import { Sidebar } from './sidebar';
 import { MobileNav } from './mobile-nav';
 import { Breadcrumbs } from './breadcrumbs';
 import { TimezoneBanner } from '../timezone-banner';
+import { CommandPalette } from '../command-palette';
 
 /** The responsive app shell (P6 task 7): sidebar on desktop, drawer on mobile, a header slot
  * (breadcrumbs + theme + user menu), and a global error boundary wrapping every routed page. */
@@ -28,6 +29,7 @@ export function AppShell(): React.JSX.Element | null {
             <Breadcrumbs />
           </div>
           <div className="flex items-center gap-1">
+            {user.mustChangePassword ? null : <CommandPalette />}
             <ThemeToggle />
             <UserMenu />
           </div>

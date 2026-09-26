@@ -1,24 +1,12 @@
 import type { Hono } from 'hono';
-import { createTagRequestSchema } from '@topicmatrix/shared';
-import type { Tag, Topic } from '@topicmatrix/db';
+import { createTagRequestSchema, renameTagRequestSchema } from '@topicmatrix/shared';
+import { computeTopicHealthView, deleteTag, type Tag } from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { parseJsonBody } from '../validation.js';
 import { getAuthUser, requireAuth, requirePasswordChanged } from '../middleware/auth.js';
-import { placeholderTopicMetrics } from './topic-tree-view.js';
 
 function toTagView(tag: Tag) {
   return { id: tag.id, name: tag.name, createdAt: tag.createdAt };
-}
-
-function toTopicSummaryView(topic: Topic) {
-  return {
-    id: topic.id,
-    subjectId: topic.subjectId,
-    parentId: topic.parentId,
-    name: topic.name,
-    depth: topic.depth,
-    metrics: placeholderTopicMetrics(),
-  };
 }
 
 /**
@@ -44,10 +32,19 @@ export function registerTagRoutes(app: Hono<AppEnv>): void {
     return c.json({ tag: toTagView(tag) }, 201);
   });
 
+  app.patch('/tags/:id', async (c) => {
+    const deps = c.get('deps');
+    const user = getAuthUser(c);
+    const body = await parseJsonBody(c, renameTagRequestSchema);
+    const tag = await deps.db.tags.rename(user.id, c.req.param('id'), body.name);
+    return c.json({ tag: toTagView(tag) });
+  });
+
+  // Removes the tag's topic attachments too (the tagged topics themselves are untouched).
   app.delete('/tags/:id', async (c) => {
     const deps = c.get('deps');
     const user = getAuthUser(c);
-    await deps.db.tags.delete(user.id, c.req.param('id'));
+    await deleteTag(deps.db, user.id, c.req.param('id'));
     return c.json({ status: 'ok' });
   });
 
@@ -55,8 +52,23 @@ export function registerTagRoutes(app: Hono<AppEnv>): void {
   app.get('/tags/:id/topics', async (c) => {
     const deps = c.get('deps');
     const user = getAuthUser(c);
-    const topics = await deps.db.tags.topicsForTag(user.id, c.req.param('id'));
-    return c.json({ topics: topics.map(toTopicSummaryView) });
+    const tagged = new Set((await deps.db.tags.topicsForTag(user.id, c.req.param('id'))).map((t) => t.id));
+    // Live score/health from the Topic Health View's computation (FR-7.6), filtered to the tag.
+    // Topics in archived subjects are left out, as they are everywhere else in the app.
+    const rows = (await computeTopicHealthView(deps.db, user.id, deps.clock())).filter((row) =>
+      tagged.has(row.topicId),
+    );
+    return c.json({
+      topics: rows.map((row) => ({
+        id: row.topicId,
+        subjectId: row.subjectId,
+        subjectName: row.subjectName,
+        name: row.name,
+        score: row.score,
+        healthStatus: row.healthStatus,
+        nextReviewOn: row.nextReviewOn,
+      })),
+    });
   });
 
   app.get('/topics/:id/tags', async (c) => {

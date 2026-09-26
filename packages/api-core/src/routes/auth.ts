@@ -7,7 +7,7 @@ import {
   normaliseKey,
   roleSchema,
 } from '@topicmatrix/shared';
-import { rotateRefreshToken, type User } from '@topicmatrix/db';
+import { changePasswordAndRestartSessions, rotateRefreshToken, type User } from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { createTokenService } from '../auth/tokens.js';
 import { parseJsonBody } from '../validation.js';
@@ -199,15 +199,30 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     const passwordService = deps.passwordService;
     const currentOk = await passwordService.verify(body.currentPassword, user.passwordHash);
     if (!currentOk) {
-      throw new AppError('UNAUTHORIZED', 'Current password is incorrect');
+      // 422 on the field, not 401: the caller IS authenticated (a 401 would make the client
+      // treat it as an expired session and refresh + retry before showing anything).
+      throw new AppError('VALIDATION_FAILED', 'Current password is incorrect', {
+        currentPassword: 'incorrect',
+      });
     }
 
+    // Every other session ends (a changed password should lock out anyone else holding one); this
+    // browser gets a fresh session, so changing your password never signs you out here — the
+    // forced first-login change included.
     const newHash = await passwordService.hash(body.newPassword);
-    await deps.db.users.update(user.id, { passwordHash: newHash, mustChangePassword: false });
-    await deps.db.refreshTokens.revokeAllForUser(user.id);
-    deleteCookie(c, REFRESH_COOKIE_NAME, { path: '/' });
+    const tokenService = createTokenService(deps.config.jwtSecret);
+    const refresh = await tokenService.issueRefreshToken();
+    const updated = await changePasswordAndRestartSessions(deps.db, user.id, newHash, {
+      tokenHash: refresh.tokenHash,
+      expiresAt: refresh.expiresAt,
+    });
+    setRefreshCookie(c, refresh.token, refresh.expiresAt);
+    const accessToken = await tokenService.signAccessToken({
+      userId: updated.id,
+      role: roleSchema.parse(updated.role),
+    });
 
     await recordAudit(deps, { actorId: user.id, action: 'auth.password_changed' });
-    return c.json({ status: 'ok' });
+    return c.json({ accessToken, user: toPublicUser(updated) });
   });
 }

@@ -72,5 +72,11 @@ export const invalidations = {
       queryClient.invalidateQueries({ queryKey: ['analytics'] }),
     ]),
 
-  afterTagWrite: () => queryClient.invalidateQueries({ queryKey: queryKeys.tags.list() }),
+  // A rename or delete also shows on every topic page carrying the tag (`['topics', id, 'tags']`)
+  // and in each tag's topic list — tag writes are rare, so refresh both prefixes wholesale.
+  afterTagWrite: () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['tags'] }),
+      queryClient.invalidateQueries({ queryKey: ['topics'] }),
+    ]),
 };

@@ -30,6 +30,13 @@ export interface TopicRepository {
    */
   create(userId: string, input: CreateTopicInput): Promise<Topic>;
   update(userId: string, topicId: string, patch: UpdateTopicInput): Promise<Topic>;
+  /**
+   * Topics whose name contains `query` (case-insensitive, via `nameNormalised`), across every
+   * subject the user owns — archived subjects excluded — shortest names first, at most `limit`.
+   */
+  search(userId: string, query: string, limit: number): Promise<(Topic & { subject: { name: string } })[]>;
+  /** The listed topics the user owns (others silently omitted), in no particular order. */
+  findManyByIds(userId: string, topicIds: readonly string[]): Promise<Topic[]>;
   delete(userId: string, topicId: string): Promise<void>;
 }
 
@@ -156,6 +163,29 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
     delete: async (userId, topicId) => {
       await findOwned(userId, topicId);
       await client.topic.delete({ where: { id: topicId } });
+    },
+    findManyByIds: (userId, topicIds) =>
+      client.topic.findMany({ where: { id: { in: [...topicIds] }, subject: { userId } } }),
+    search: async (userId, query, limit) => {
+      const needle = normaliseKey(query);
+      if (needle.length === 0) {
+        return [];
+      }
+      const matches = await client.topic.findMany({
+        where: { nameNormalised: { contains: needle }, subject: { userId, isArchived: false } },
+        include: { subject: { select: { name: true } } },
+        // Over-fetch a little, then rank in memory: prefix matches first, then shorter names.
+        take: limit * 3,
+        orderBy: SIBLING_ORDER,
+      });
+      return matches
+        .sort(
+          (a, b) =>
+            Number(!a.nameNormalised.startsWith(needle)) - Number(!b.nameNormalised.startsWith(needle)) ||
+            a.name.length - b.name.length ||
+            a.name.localeCompare(b.name),
+        )
+        .slice(0, limit);
     },
   };
 }

@@ -46,6 +46,7 @@ export {
   adminUsersListResponseSchema,
   adminCreateUserResponseSchema,
   adminUpdateUserResponseSchema,
+  adminResetPasswordResponseSchema,
 } from './auth.js';
 export type {
   LoginRequest,
@@ -58,6 +59,7 @@ export type {
   StatusResponse,
   AdminUserView,
   AdminUsersListResponse,
+  AdminResetPasswordResponse,
   AdminCreateUserResponse,
   AdminUpdateUserResponse,
 } from './auth.js';
@@ -93,6 +95,8 @@ export {
   topicsListResponseSchema,
   topicResponseSchema,
   topicTreeNodeSchema,
+  topicSearchResultSchema,
+  topicSearchResponseSchema,
 } from './topics.js';
 export type {
   CreateTopicRequest,
@@ -104,13 +108,16 @@ export type {
   TopicsListResponse,
   TopicResponse,
   TopicTreeNodeView,
+  TopicSearchResult,
+  TopicSearchResponse,
 } from './topics.js';
 export {
   createTagRequestSchema,
   tagViewSchema,
   tagsListResponseSchema,
   tagResponseSchema,
-  topicSummaryViewSchema,
+  renameTagRequestSchema,
+  taggedTopicViewSchema,
   topicsForTagResponseSchema,
 } from './tags.js';
 export type {
@@ -118,7 +125,8 @@ export type {
   TagView,
   TagsListResponse,
   TagResponse,
-  TopicSummaryView,
+  RenameTagRequest,
+  TaggedTopicView,
   TopicsForTagResponse,
 } from './tags.js';
 export {

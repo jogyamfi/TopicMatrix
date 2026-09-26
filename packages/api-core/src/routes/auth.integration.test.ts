@@ -245,6 +245,36 @@ describe('auth routes', () => {
     expect((await ctx.app.request(loginRequest(user.email, 'new-password-456'))).status).toBe(200);
   });
 
+  it('keeps the changing browser signed in on a fresh session, and ends every other session (R4)', async () => {
+    const user = await createActiveUser(ctx, 'old-password-123');
+    const thisTab = await ctx.app.request(loginRequest(user.email, 'old-password-123'));
+    const otherDevice = await ctx.app.request(loginRequest(user.email, 'old-password-123'));
+    const { accessToken } = await readJson<LoginResponseBody>(thisTab);
+
+    const changed = await ctx.app.request('/auth/change-password', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ currentPassword: 'old-password-123', newPassword: 'new-password-456' }),
+    });
+    expect(changed.status).toBe(200);
+    const body = await readJson<LoginResponseBody>(changed);
+    expect(body.accessToken).toBeTruthy();
+    expect(body.user.mustChangePassword).toBe(false);
+
+    // The fresh cookie works…
+    const fresh = await ctx.app.request('/auth/refresh', {
+      method: 'POST',
+      headers: { cookie: `refreshToken=${cookieValue(changed, 'refreshToken')}` },
+    });
+    expect(fresh.status).toBe(200);
+    // …while the other device's session is over.
+    const other = await ctx.app.request('/auth/refresh', {
+      method: 'POST',
+      headers: { cookie: `refreshToken=${cookieValue(otherDevice, 'refreshToken')}` },
+    });
+    expect(other.status).toBe(401);
+  });
+
   it('rejects a change-password request with an incorrect current password', async () => {
     const user = await createActiveUser(ctx, 'correct-horse-battery');
     const login = await ctx.app.request(loginRequest(user.email, 'correct-horse-battery'));
@@ -258,7 +288,7 @@ describe('auth routes', () => {
         newPassword: 'new-password-456',
       }),
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(422);
   });
 
   it('rate-limits login, returning 429 on the 11th attempt in the window', async () => {

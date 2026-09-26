@@ -8,12 +8,14 @@ import {
   subjectsListResponseSchema,
   tagsListResponseSchema,
   type ReviewStartRequest,
+  type TopicSearchResult,
 } from '@topicmatrix/shared';
 import { apiFetch, ApiError } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { startLauncherRun } from '../../lib/launcher-store';
 import { useAuth } from '../../context/auth-context';
 import { Button } from '../../components/ui/button';
+import { TopicCombobox, topicLocation } from '../../components/topic-search';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
@@ -26,14 +28,18 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog';
 
-type PickableMode = 'dueToday' | 'weakest' | 'subject';
+type PickableMode = 'dueToday' | 'weakest' | 'subject' | 'topicSubtree';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Fixes the mode to a specific subject or topic subtree, hiding the generic mode picker \u2014
    * used by the "Review this subject/topic" entry points on the subject tree and topic pages. */
-  fixedScope?: { mode: 'subject'; subjectId: string; label: string } | { mode: 'topicSubtree'; topicId: string; label: string };
+  fixedScope?:
+    | { mode: 'subject'; subjectId: string; label: string }
+    | { mode: 'topicSubtree'; topicId: string; label: string }
+    /** Every topic carrying the tag, weakest first (R4 — the tags page's "Review this tag"). */
+    | { mode: 'tag'; tagId: string; label: string };
 }
 
 /**
@@ -47,6 +53,7 @@ export function LaunchReviewDialog({ open, onOpenChange, fixedScope }: Props): R
   const { user } = useAuth();
   const [mode, setMode] = useState<PickableMode>('dueToday');
   const [subjectId, setSubjectId] = useState('');
+  const [pickedTopic, setPickedTopic] = useState<TopicSearchResult | null>(null);
   const [tagId, setTagId] = useState('');
   const [healthStatus, setHealthStatus] = useState('');
   const [notReviewedInDays, setNotReviewedInDays] = useState('');
@@ -87,18 +94,25 @@ export function LaunchReviewDialog({ open, onOpenChange, fixedScope }: Props): R
     event.preventDefault();
     setError(null);
 
-    const effectiveMode = fixedScope?.mode ?? mode;
-    if (effectiveMode === 'subject' && !fixedScope && subjectId.length === 0) {
+    const scopeMode = fixedScope?.mode ?? mode;
+    if (scopeMode === 'subject' && !fixedScope && subjectId.length === 0) {
       setError('Choose a subject');
       return;
     }
+    if (scopeMode === 'topicSubtree' && !fixedScope && !pickedTopic) {
+      setError('Choose a topic');
+      return;
+    }
 
+    // A tag scope is "weakest first" filtered to the tag — the tag filter already exists.
+    const effectiveTagId = fixedScope?.mode === 'tag' ? fixedScope.tagId : tagId;
     const body: ReviewStartRequest = {
-      mode: effectiveMode,
+      mode: scopeMode === 'tag' ? 'weakest' : scopeMode,
       ...(fixedScope?.mode === 'subject' ? { subjectId: fixedScope.subjectId } : {}),
       ...(fixedScope?.mode === 'topicSubtree' ? { topicId: fixedScope.topicId } : {}),
       ...(!fixedScope && mode === 'subject' ? { subjectId } : {}),
-      ...(tagId ? { tagId } : {}),
+      ...(!fixedScope && mode === 'topicSubtree' && pickedTopic ? { topicId: pickedTopic.id } : {}),
+      ...(effectiveTagId ? { tagId: effectiveTagId } : {}),
       ...(healthStatusSchema.safeParse(healthStatus).success ? { healthStatus: healthStatus as ReviewStartRequest['healthStatus'] } : {}),
       ...(notReviewedInDays ? { notReviewedInDays: Number.parseInt(notReviewedInDays, 10) } : {}),
       ...(minScore ? { minScore: Number.parseInt(minScore, 10) } : {}),
@@ -131,6 +145,7 @@ export function LaunchReviewDialog({ open, onOpenChange, fixedScope }: Props): R
                     <SelectItem value="dueToday">Due today (overdue + due)</SelectItem>
                     <SelectItem value="weakest">Weakest topics first</SelectItem>
                     <SelectItem value="subject">A specific subject</SelectItem>
+                    <SelectItem value="topicSubtree">A topic and its sub-topics</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -150,6 +165,25 @@ export function LaunchReviewDialog({ open, onOpenChange, fixedScope }: Props): R
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            ) : null}
+
+            {!fixedScope && mode === 'topicSubtree' ? (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="launch-topic">Topic</Label>
+                {pickedTopic ? (
+                  <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+                    <span className="min-w-0">
+                      <span className="font-medium">{pickedTopic.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{topicLocation(pickedTopic)}</span>
+                    </span>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setPickedTopic(null)}>
+                      Change
+                    </Button>
+                  </div>
+                ) : (
+                  <TopicCombobox id="launch-topic" onSelect={setPickedTopic} />
+                )}
               </div>
             ) : null}
 

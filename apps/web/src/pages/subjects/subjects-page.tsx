@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Archive, BookOpen, Clock, ListTree, Plus } from 'lucide-react';
-import { subjectsListResponseSchema, type SubjectListItem } from '@topicmatrix/shared';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Archive, ArchiveRestore, BookOpen, Clock, ListTree, Plus } from 'lucide-react';
+import { subjectResponseSchema, subjectsListResponseSchema, type SubjectListItem } from '@topicmatrix/shared';
 import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
+import { invalidations } from '../../lib/invalidations';
+import { toast } from '../../lib/toast-store';
 import { describeError } from '../../lib/api-error';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -24,13 +26,18 @@ function SubjectCard({
   subject,
   onEdit,
   onDelete,
+  onSetArchived,
 }: {
   subject: SubjectListItem;
   onEdit: () => void;
   onDelete: () => void;
+  onSetArchived: (archived: boolean) => void;
 }): React.JSX.Element {
+  // Archived subjects are read-only here: out of the queue, analytics and search, with Unarchive
+  // as the one action (R4, U-3).
+  const archived = subject.isArchived;
   return (
-    <Card className="flex flex-col">
+    <Card className={archived ? 'flex flex-col border-dashed opacity-75' : 'flex flex-col'}>
       <CardHeader className="flex-row items-start justify-between gap-2 space-y-0">
         <div className="flex items-center gap-2">
           {subject.icon ? (
@@ -41,9 +48,13 @@ function SubjectCard({
             <BookOpen aria-hidden="true" className="size-5 text-muted-foreground" />
           )}
           <CardTitle>
-            <Link to={`/subjects/${subject.id}`} className="hover:underline">
-              {subject.name}
-            </Link>
+            {archived ? (
+              subject.name
+            ) : (
+              <Link to={`/subjects/${subject.id}`} className="hover:underline">
+                {subject.name}
+              </Link>
+            )}
           </CardTitle>
         </div>
         {subject.isArchived ? (
@@ -80,19 +91,28 @@ function SubjectCard({
           <Clock className="size-3.5" aria-hidden="true" />
           {formatLastActivity(subject.summary.lastActivityOn)}
         </p>
-        <div className="flex gap-2">
-          <Button asChild variant="outline" size="sm" className="flex-1">
-            <Link to={`/subjects/${subject.id}`}>
-              <ListTree /> Open tree
-            </Link>
+        {archived ? (
+          <Button variant="outline" size="sm" onClick={() => onSetArchived(false)}>
+            <ArchiveRestore /> Unarchive
           </Button>
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            Edit
-          </Button>
-          <Button variant="outline" size="sm" onClick={onDelete}>
-            Delete
-          </Button>
-        </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm" className="flex-1">
+              <Link to={`/subjects/${subject.id}`}>
+                <ListTree /> Open tree
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" onClick={onEdit}>
+              Edit
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => onSetArchived(true)} aria-label={`Archive ${subject.name}`}>
+              <Archive /> Archive
+            </Button>
+            <Button variant="outline" size="sm" onClick={onDelete}>
+              Delete
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -101,9 +121,31 @@ function SubjectCard({
 /** Subject list (FR-2.*, delivery-plan.md P7 task 1) — cards with create/edit/delete, each
  * linking through to its topic tree. */
 export default function SubjectsPage(): React.JSX.Element {
+  const [showArchived, setShowArchived] = useState(false);
   const subjectsQuery = useQuery({
-    queryKey: queryKeys.subjects.list(),
-    queryFn: () => apiFetch('/subjects', subjectsListResponseSchema),
+    queryKey: showArchived ? queryKeys.subjects.listWithArchived() : queryKeys.subjects.list(),
+    queryFn: () =>
+      apiFetch(showArchived ? '/subjects?includeArchived=true' : '/subjects', subjectsListResponseSchema),
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: (vars: { subject: SubjectListItem; archived: boolean }) =>
+      apiFetch(`/subjects/${vars.subject.id}`, subjectResponseSchema, {
+        method: 'PATCH',
+        body: { isArchived: vars.archived },
+      }),
+    onSuccess: async (data, vars) => {
+      await invalidations.afterSubjectWrite();
+      toast(
+        vars.archived
+          ? {
+              title: `${data.subject.name} archived`,
+              description: 'Its topics are out of your review queue and analytics until you unarchive it.',
+            }
+          : { title: `${data.subject.name} unarchived` },
+      );
+    },
+    onError: (err) => toast({ title: 'Could not update subject', description: describeError(err), variant: 'destructive' }),
   });
 
   // `?new=1` (the dashboard's getting-started link) opens the create dialog straight away.
@@ -118,14 +160,25 @@ export default function SubjectsPage(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold">Subjects</h1>
           <p className="text-sm text-muted-foreground">Break each subject down into a tree of topics.</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus /> New subject
-        </Button>
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="size-4 accent-primary"
+            />
+            Show archived
+          </label>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus /> New subject
+          </Button>
+        </div>
       </div>
 
       {subjectsQuery.isPending ? (
@@ -157,6 +210,7 @@ export default function SubjectsPage(): React.JSX.Element {
               subject={subject}
               onEdit={() => setEditTarget(subject)}
               onDelete={() => setDeleteTarget(subject)}
+              onSetArchived={(archived) => archiveMutation.mutate({ subject, archived })}
             />
           ))}
         </div>

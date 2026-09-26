@@ -264,6 +264,84 @@ describe('admin user-management routes', () => {
     expect(remove.status).toBe(200);
   });
 
+  describe('password reset (R4)', () => {
+    it('issues a one-time temporary password, forces a change and ends existing sessions', async () => {
+      const { accessToken } = await createLoggedInUser(ctx, 'ADMIN');
+      const passwordService = createPasswordService({ memoryKib: 19456, iterations: 2 });
+      const learner = await ctx.fixtures.createUser({ passwordHash: await passwordService.hash('learner-password-1') });
+      await ctx.db.refreshTokens.create(learner.id, { tokenHash: 'learner-session', expiresAt: new Date(Date.now() + 60_000) });
+
+      const res = await ctx.app.request(`/admin/users/${learner.id}/reset-password`, {
+        method: 'POST',
+        headers: authed(accessToken),
+      });
+      expect(res.status).toBe(200);
+      const { temporaryPassword } = await readJson<{ temporaryPassword: string }>(res);
+      expect(temporaryPassword.length).toBeGreaterThanOrEqual(12);
+
+      const reloaded = await ctx.db.users.findById(learner.id);
+      expect(reloaded?.mustChangePassword).toBe(true);
+      expect(await passwordService.verify(temporaryPassword, reloaded?.passwordHash ?? '')).toBe(true);
+      expect((await ctx.db.refreshTokens.findByTokenHash('learner-session'))?.revokedAt).not.toBeNull();
+    });
+
+    it('refuses to reset your own password (use Change password instead)', async () => {
+      const { accessToken, userId } = await createLoggedInUser(ctx, 'ADMIN');
+      const res = await ctx.app.request(`/admin/users/${userId}/reset-password`, {
+        method: 'POST',
+        headers: authed(accessToken),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('is admin-only', async () => {
+      const { accessToken } = await createLoggedInUser(ctx, 'LEARNER');
+      const other = await ctx.fixtures.createUser();
+      const res = await ctx.app.request(`/admin/users/${other.id}/reset-password`, {
+        method: 'POST',
+        headers: authed(accessToken),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('role changes (R4)', () => {
+    async function patchRole(accessToken: string, userId: string, role: Role): Promise<Response> {
+      return ctx.app.request(`/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { ...authed(accessToken), 'content-type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+    }
+
+    it('promotes a learner and demotes another admin', async () => {
+      const { accessToken } = await createLoggedInUser(ctx, 'ADMIN');
+      const learner = await ctx.fixtures.createUser({ role: 'LEARNER' });
+
+      const promote = await patchRole(accessToken, learner.id, 'ADMIN');
+      expect(promote.status).toBe(200);
+      expect((await readJson<{ user: AdminUserView }>(promote)).user.role).toBe('ADMIN');
+
+      const demote = await patchRole(accessToken, learner.id, 'LEARNER');
+      expect(demote.status).toBe(200);
+      expect((await ctx.db.users.findById(learner.id))?.role).toBe('LEARNER');
+    });
+
+    it('refuses to change your own role', async () => {
+      const { accessToken, userId } = await createLoggedInUser(ctx, 'ADMIN');
+      expect((await patchRole(accessToken, userId, 'LEARNER')).status).toBe(403);
+      expect((await ctx.db.users.findById(userId))?.role).toBe('ADMIN');
+    });
+
+    it('a demoted admin loses admin access on their very next request', async () => {
+      const { accessToken } = await createLoggedInUser(ctx, 'ADMIN');
+      const { accessToken: otherToken, userId: otherId } = await createLoggedInUser(ctx, 'ADMIN');
+
+      await patchRole(accessToken, otherId, 'LEARNER');
+      expect((await ctx.app.request('/admin/users', { headers: authed(otherToken) })).status).toBe(403);
+    });
+  });
+
   it('never exposes subjects/topics/sessions under /admin (SRS §16 Q7)', async () => {
     const { accessToken: adminToken } = await createLoggedInUser(ctx, 'ADMIN');
     const res = await ctx.app.request('/admin/subjects', { headers: authed(adminToken) });

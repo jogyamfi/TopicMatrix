@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 // Full acceptance walkthrough (delivery-plan.md P10 task 6): first-run admin seed \u2192 login \u2192
@@ -12,6 +12,11 @@ const NEW_PASSWORD = 'NewSecurePassword456!';
 
 test.describe.configure({ mode: 'serial' });
 
+/** The sidebar — page content (breadcrumbs, cards) can have links with the same names. */
+function primaryNav(page: Page) {
+  return page.getByRole('navigation', { name: 'Primary' });
+}
+
 test('first-run admin seed through export (P10 acceptance criteria)', async ({ page }) => {
   await test.step('login with the seeded temporary password', async () => {
     await page.goto('/login');
@@ -21,14 +26,17 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
     await expect(page).toHaveURL(/\/change-password$/);
   });
 
-  await test.step('forced password change', async () => {
+  await test.step('forced password change keeps you signed in (R4)', async () => {
     await page.getByLabel('Current password').fill(SEEDED_PASSWORD);
     await page.getByLabel('New password').fill(NEW_PASSWORD);
     await page.getByRole('button', { name: 'Change password' }).click();
-    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole('heading', { name: /Welcome back/ })).toBeVisible();
   });
 
-  await test.step('login again with the new password', async () => {
+  await test.step('sign out and back in with the new password', async () => {
+    await page.getByRole('button', { name: 'Administrator' }).click();
+    await page.getByRole('button', { name: 'Log out' }).click();
+    await expect(page).toHaveURL(/\/login$/);
     await page.getByLabel('Email').fill(SEEDED_EMAIL);
     await page.getByLabel('Password').fill(NEW_PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
@@ -36,7 +44,7 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
   });
 
   await test.step('create a subject and a topic', async () => {
-    await page.getByRole('link', { name: 'Subjects' }).click();
+    await primaryNav(page).getByRole('link', { name: 'Subjects' }).click();
     await page.getByRole('button', { name: 'New subject' }).first().click();
     await page.getByLabel('Name', { exact: true }).fill('Mathematics');
     await page.getByRole('button', { name: 'Create subject' }).click();
@@ -75,7 +83,7 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
   });
 
   await test.step('the review queue lists never-studied topics separately', async () => {
-    await page.getByRole('link', { name: 'Review' }).click();
+    await primaryNav(page).getByRole('link', { name: 'Review' }).click();
     const notStarted = page.locator('details').filter({ hasText: 'Not started yet' });
     await expect(notStarted).toContainText('(1)');
     // Collapsed while something is due (Algebra is now scheduled this week) — expand it.
@@ -105,14 +113,14 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
   });
 
   await test.step('view analytics', async () => {
-    await page.getByRole('link', { name: 'Analytics' }).click();
+    await primaryNav(page).getByRole('link', { name: 'Analytics' }).click();
     await expect(page.getByRole('tab', { name: 'Health view' })).toBeVisible();
     await page.getByRole('tab', { name: 'Mastery' }).click();
     await expect(page.getByRole('tabpanel')).toBeVisible();
   });
 
   await test.step('export data', async () => {
-    await page.getByRole('link', { name: 'Export' }).click();
+    await primaryNav(page).getByRole('link', { name: 'Export' }).click();
     const [download] = await Promise.all([
       page.waitForEvent('download'),
       page.getByRole('button', { name: 'Download JSON export' }).click(),
@@ -121,10 +129,50 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
   });
 
   await test.step('change settings', async () => {
-    await page.getByRole('link', { name: 'Settings' }).click();
+    await primaryNav(page).getByRole('link', { name: 'Settings' }).click();
     await page.getByLabel('Day starts at (hour, 0-23)').fill('5');
     await page.getByRole('button', { name: 'Save settings' }).click();
     await expect(page.getByText('Settings saved')).toBeVisible();
+  });
+
+  await test.step('jump to a topic from anywhere with Ctrl+K (R4)', async () => {
+    await page.keyboard.press('Control+K');
+    const palette = page.getByRole('dialog', { name: 'Jump to a topic' });
+    await palette.getByRole('combobox', { name: 'Search topics' }).fill('alg');
+    await expect(palette.getByRole('option', { name: /Algebra/ })).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 1, name: 'Algebra' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Mathematics');
+  });
+
+  await test.step('archive and unarchive a subject (R4)', async () => {
+    await primaryNav(page).getByRole('link', { name: 'Subjects' }).click();
+    await page.getByRole('button', { name: 'Archive Mathematics' }).click();
+    await expect(page.getByText('Mathematics archived')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Mathematics' })).toBeHidden();
+
+    await page.getByLabel('Show archived').check();
+    await page.getByRole('button', { name: 'Unarchive' }).click();
+    await expect(page.getByText('Mathematics unarchived')).toBeVisible();
+    await page.getByLabel('Show archived').uncheck();
+    await expect(page.getByRole('link', { name: 'Mathematics' })).toBeVisible();
+  });
+
+  await test.step('an admin resets a user password (R4)', async () => {
+    await primaryNav(page).getByRole('link', { name: 'Users' }).click();
+    await page.getByRole('button', { name: 'New user' }).click();
+    const createDialog = page.getByRole('dialog');
+    await createDialog.getByLabel('Email').fill('learner@example.com');
+    await createDialog.getByLabel('Display name').fill('Lee Learner');
+    await createDialog.getByRole('button', { name: 'Create user' }).click();
+    await createDialog.getByRole('button', { name: 'Done' }).click();
+
+    const row = page.getByRole('row').filter({ hasText: 'learner@example.com' });
+    await row.getByRole('button', { name: 'Reset password' }).click();
+    const resetDialog = page.getByRole('dialog');
+    await resetDialog.getByRole('button', { name: 'Reset password' }).click();
+    await expect(resetDialog.getByTestId('temporary-password')).not.toBeEmpty();
+    await resetDialog.getByRole('button', { name: 'Done' }).click();
   });
 });
 
@@ -143,7 +191,7 @@ test('dashboard and settings pages have no serious/critical accessibility violat
   );
   expect(dashboardSerious, JSON.stringify(dashboardSerious, null, 2)).toHaveLength(0);
 
-  await page.getByRole('link', { name: 'Settings' }).click();
+  await primaryNav(page).getByRole('link', { name: 'Settings' }).click();
   const settingsScan = await new AxeBuilder({ page }).analyze();
   const settingsSerious = settingsScan.violations.filter(
     (v) => v.impact === 'serious' || v.impact === 'critical',
@@ -151,7 +199,7 @@ test('dashboard and settings pages have no serious/critical accessibility violat
   expect(settingsSerious, JSON.stringify(settingsSerious, null, 2)).toHaveLength(0);
 
   // The review queue, including R3's "Not started yet" section.
-  await page.getByRole('link', { name: 'Review' }).click();
+  await primaryNav(page).getByRole('link', { name: 'Review' }).click();
   await expect(page.getByText('Not started yet')).toBeVisible();
   const reviewScan = await new AxeBuilder({ page }).analyze();
   const reviewSerious = reviewScan.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
