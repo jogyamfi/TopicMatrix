@@ -91,4 +91,30 @@ describe('authStore clears user-scoped client state', () => {
       message: 'Too many login attempts. Try again later.',
     });
   });
+
+  it('signs this tab out when another tab signs out (BroadcastChannel)', async () => {
+    stubFetch(() => authResponse('alice'));
+    await authStore.login('alice@example.com', 'correct horse battery');
+    queryClient.setQueryData(['subjects'], { subjects: ['alice-only'] });
+
+    const otherTab = new BroadcastChannel('topicmatrix-auth');
+    otherTab.postMessage({ type: 'signed-out' });
+    otherTab.close();
+
+    await vi.waitFor(() => expect(authStore.getState().status).toBe('unauthenticated'));
+    expect(queryClient.getQueryData(['subjects'])).toBeUndefined();
+  });
+
+  it('adopts the new session when another tab signs in as a different user', async () => {
+    stubFetch(() => authResponse('alice'));
+    await authStore.login('alice@example.com', 'correct horse battery');
+
+    // The other tab's login replaced the shared refresh cookie; our refresh now returns bob.
+    stubFetch(() => authResponse('bob'));
+    const otherTab = new BroadcastChannel('topicmatrix-auth');
+    otherTab.postMessage({ type: 'signed-in', userId: 'bob' });
+    otherTab.close();
+
+    await vi.waitFor(() => expect(authStore.getState().user?.id).toBe('bob'));
+  });
 });

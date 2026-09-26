@@ -84,13 +84,12 @@ async function computeEligibleTopicItems(
   const items: ReviewQueueItem[] = [];
   for (const topic of topics) {
     const subject = subjectById.get(topic.subjectId);
-    // Suspended and archived items are excluded (FR-5.10, FR-7.1) \u2014 at either the topic or the
-    // per-schedule level (the two are distinct booleans; see progress.md's P7 handover note).
+    // Suspended topics and archived subjects are excluded (FR-5.10, FR-7.1).
     if (!subject || subject.isArchived || topic.isSuspended) {
       continue;
     }
     const schedule = scheduleByTopic.get(topic.id) ?? null;
-    if (!schedule || schedule.isSuspended) {
+    if (!schedule) {
       continue;
     }
 

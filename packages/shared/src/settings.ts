@@ -38,7 +38,12 @@ export const userSettingsViewSchema = z.object({
 });
 export type UserSettingsView = z.infer<typeof userSettingsViewSchema>;
 
-export const userSettingsResponseSchema = z.object({ settings: userSettingsViewSchema });
+// `schedulesChanged` (PATCH only): next-review dates that moved because the default algorithm
+// or manual ladder changed (FR-5.7).
+export const userSettingsResponseSchema = z.object({
+  settings: userSettingsViewSchema,
+  schedulesChanged: z.number().int().optional(),
+});
 export type UserSettingsResponse = z.infer<typeof userSettingsResponseSchema>;
 
 // Live preview of a scoring-weight/threshold change against a sample topic (FR-8.2 task 2) —

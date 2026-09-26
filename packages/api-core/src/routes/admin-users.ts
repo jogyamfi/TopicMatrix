@@ -6,7 +6,7 @@ import {
   adminUpdateUserRequestSchema,
   normaliseKey,
 } from '@topicmatrix/shared';
-import { deleteUserAccount, type User } from '@topicmatrix/db';
+import { createUserWithDefaultSettings, deleteUserAccount, type User } from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { randomOpaqueToken } from '../auth/crypto-utils.js';
 import { parseJsonBody } from '../validation.js';
@@ -73,14 +73,13 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
     const temporaryPassword = randomOpaqueToken(9);
     const passwordHash = await deps.passwordService.hash(temporaryPassword);
 
-    const user = await deps.db.users.create({
+    const user = await createUserWithDefaultSettings(deps.db, {
       email: body.email,
       emailNormalised,
       passwordHash,
       displayName: body.displayName,
       mustChangePassword: true,
     });
-    await deps.db.userSettings.createDefault(user.id);
 
     await recordAudit(deps, {
       actorId: actor.id,

@@ -65,7 +65,10 @@ export function LogSessionDialog({ topic, onOpenChange, onLogged }: Props): Reac
     setNotes('');
     setGradeOverride(null);
     setError(null);
-  }, [topic]);
+    // Keyed on the id, not the object: callers pass a fresh `{ id, subjectId, name }` literal on
+    // every render, and resetting on identity would wipe the form whenever the parent re-renders
+    // (e.g. a launcher snooze resolving while the user is typing).
+  }, [topic?.id]);
 
   const attempted = Number.parseInt(questionsAttempted, 10);
   const correct = Number.parseInt(questionsCorrect, 10);

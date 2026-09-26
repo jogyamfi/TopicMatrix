@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { computeCompetencyScore, getScheduler, replaySchedule, roundScoreForStorage, type Grade } from '@topicmatrix/core';
-import { addDays, startOfUserDay } from '@topicmatrix/shared';
+import { addDays, scheduleOverrideResponseSchema, startOfUserDay } from '@topicmatrix/shared';
 import { setupApiTest, type ApiTestContext } from '../../test/setup.js';
 import { createPasswordService } from '../auth/password.js';
 import { createTokenService } from '../auth/tokens.js';
@@ -277,7 +277,7 @@ describe('study session, scoring and scheduling routes (FR-4.*, FR-5.*, delivery
       expect(afterSnooze.nextReviewOn).toBe(addDays(userToday, 1).toISOString());
     });
 
-    it('can suspend a topic that has never been studied (no ReviewSchedule row exists yet)', async () => {
+    it('can suspend a topic that has never been studied, on the topic itself (one suspend flag)', async () => {
       const { accessToken, userId } = await createLoggedInUser(ctx);
       const subject = await ctx.fixtures.createSubject(userId);
       const topic = await ctx.fixtures.createTopic(userId, subject.id);
@@ -289,13 +289,45 @@ describe('study session, scoring and scheduling routes (FR-4.*, FR-5.*, delivery
         body: JSON.stringify({ action: 'suspend', suspended: true }),
       });
       expect(res.status).toBe(200);
-      const schedule = (await readJson<{ schedule: ScheduleView }>(res)).schedule;
+      // The response matches the shared schema the web client parses it with (it didn't, before
+      // R2: `status` was missing, so every Pause/Snooze in the UI reported a failure).
+      const body = scheduleOverrideResponseSchema.parse(await res.json());
+      expect(body.schedule).toBeNull(); // no schedule row is invented just to hold the flag
+      expect((await ctx.db.topics.findById(userId, topic.id))?.isSuspended).toBe(true);
+    });
+
+    it('keeps a suspended topic suspended through later session writes, and out of the queue', async () => {
+      const { accessToken, userId } = await createLoggedInUser(ctx);
+      const subject = await ctx.fixtures.createSubject(userId);
+      const topic = await ctx.fixtures.createTopic(userId, subject.id);
+
+      await ctx.app.request(`/topics/${topic.id}/schedule/override`, {
+        method: 'POST',
+        headers: authed(accessToken),
+        body: JSON.stringify({ action: 'suspend', suspended: true }),
+      });
+      const logged = await ctx.app.request(`/topics/${topic.id}/sessions`, {
+        method: 'POST',
+        headers: authed(accessToken),
+        body: JSON.stringify({ studiedOn: iso(30), questionsAttempted: 10, questionsCorrect: 5, confidence: 2 }),
+      });
+      const schedule = (await readJson<{ schedule: ScheduleView }>(logged)).schedule;
       expect(schedule.isSuspended).toBe(true);
-      expect(schedule.algorithm).toBe('fsrs');
+
+      const queue = await readJson<{ overdue: { topicId: string }[] }>(
+        await ctx.app.request('/review/queue', { headers: authed(accessToken) }),
+      );
+      expect(queue.overdue.map((i) => i.topicId)).not.toContain(topic.id);
+
+      // …and it's not counted as due on the subject card either.
+      const subjects = await readJson<{ subjects: { id: string; summary: { dueTodayCount: number } }[] }>(
+        await ctx.app.request('/subjects', { headers: authed(accessToken) }),
+      );
+      expect(subjects.subjects.find((s) => s.id === subject.id)?.summary.dueTodayCount).toBe(0);
     });
   });
 
-  it('GET /topics/:id/history returns a date-range-filterable snapshot per session write (FR-7.7/7.10)', async () => {
+  it('GET /topics/:id/history returns a date-range-filterable snapshot per study day (FR-7.7/7.10)', async () => {
     const { accessToken, userId } = await createLoggedInUser(ctx);
     const subject = await ctx.fixtures.createSubject(userId);
     const topic = await ctx.fixtures.createTopic(userId, subject.id);

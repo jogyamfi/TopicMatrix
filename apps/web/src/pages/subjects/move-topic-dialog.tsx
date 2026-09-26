@@ -67,7 +67,7 @@ export function MoveTopicDialog({ topic, currentSubjectId, onOpenChange }: Props
     setTargetSubjectId(currentSubjectId);
     setTargetParentId(topic.parentId ?? ROOT);
     setError(null);
-  }, [topic, currentSubjectId]);
+  }, [topic?.id, currentSubjectId]);
 
   const subjectsQuery = useQuery({
     queryKey: ['subjects-for-move'],

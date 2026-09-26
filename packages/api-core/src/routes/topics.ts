@@ -9,7 +9,7 @@ import {
 import {
   deleteTopic,
   moveTopic,
-  recalculateTopicSchedule,
+  updateTopicAndReschedule,
   computeSubjectTopicMetrics,
   computeTopicMetrics,
   type Topic,
@@ -100,17 +100,15 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
     const deps = c.get('deps');
     const user = getAuthUser(c);
     const body = await parseJsonBody(c, updateTopicRequestSchema);
-    const topic = await deps.db.topics.update(user.id, c.req.param('id'), withoutUndefined(body));
-
-    // Changing the algorithm re-derives the schedule from history (FR-5.7) — the response tells
-    // the UI whether nextReviewOn actually moved, so it can warn the user.
-    let scheduleChanged = false;
-    if (body.algorithmOverride !== undefined) {
-      const recalculation = await recalculateTopicSchedule(deps.db, user.id, topic.id, {
-        asOfDate: deps.clock(),
-      });
-      scheduleChanged = recalculation.datesChanged;
-    }
+    // Changing the algorithm re-derives the schedule from history (FR-5.7), in the same
+    // transaction — the response tells the UI whether nextReviewOn actually moved, so it can
+    // warn the user.
+    const { topic, scheduleChanged } = await updateTopicAndReschedule(
+      deps.db,
+      user.id,
+      c.req.param('id'),
+      withoutUndefined(body),
+    );
 
     const metrics = await computeTopicMetrics(deps.db, user.id, topic.id, deps.clock());
     return c.json({ topic: toTopicView(topic, metrics), scheduleChanged });
@@ -125,7 +123,8 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
     return c.json({ status: 'ok' });
   });
 
-  // Re-parent (including across subjects, FR-3.5) and/or reorder; rejects cycles with TOPIC_CYCLE (FR-3.4).
+  // Re-parent (including across subjects, FR-3.5) and/or reorder to a position among the
+  // siblings; rejects cycles with TOPIC_CYCLE (FR-3.4).
   app.post('/topics/:id/move', async (c) => {
     const deps = c.get('deps');
     const user = getAuthUser(c);

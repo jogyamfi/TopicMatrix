@@ -8,8 +8,23 @@ export { deleteUserAccount } from './account-deletion.js';
 export { deleteSubjectCascade } from './subject-deletion.js';
 export { moveTopic, deleteTopic } from './topic-tree.js';
 export type { MoveTopicInput } from './topic-tree.js';
-export { resolveAlgorithm, recalculateTopicSchedule, applyScheduleOverride } from './scheduling.js';
-export type { RecalculationResult, ScheduleOverride } from './scheduling.js';
+export {
+  resolveAlgorithm,
+  recalculateTopicSchedule,
+  recalculateTopicScheduleInTx,
+  recalculateTopicSchedulesInTx,
+  applyScheduleOverride,
+} from './scheduling.js';
+export type { RecalculationResult, ScheduleOverride, ScheduleOverrideResult } from './scheduling.js';
+export { logStudySession, updateStudySession, deleteStudySession } from './session-writes.js';
+export type { SessionWriteResult } from './session-writes.js';
+export {
+  updateSubjectAndReschedule,
+  updateTopicAndReschedule,
+  updateSettingsAndReschedule,
+} from './rescheduling.js';
+export { createUserWithDefaultSettings, rotateRefreshToken } from './account-writes.js';
+export { REVOKED_TOKEN_RETENTION_MS } from './repositories/refresh-token.js';
 export { computeSubjectTopicMetrics, computeTopicMetrics } from './topic-metrics.js';
 export type { TopicScoreMetrics } from './topic-metrics.js';
 export { computeSubjectSummary } from './subject-summary.js';

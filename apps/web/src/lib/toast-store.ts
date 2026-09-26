@@ -24,6 +24,15 @@ export function toast(item: Omit<ToastItem, 'id'>): void {
   emit();
 }
 
+/** Tells the user when a settings/subject change moved existing next-review dates (FR-5.7). */
+export function toastSchedulesChanged(count: number | undefined): void {
+  if (!count) return;
+  toast({
+    title: 'Review dates updated',
+    description: `Next review dates were recalculated for ${count} topic${count === 1 ? '' : 's'}.`,
+  });
+}
+
 export function dismissToast(id: string): void {
   toasts = toasts.filter((t) => t.id !== id);
   emit();

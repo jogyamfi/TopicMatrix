@@ -7,7 +7,14 @@ import { AppError } from '@topicmatrix/shared';
 import type { Db } from './db.js';
 
 const EXPORT_PAGE_SIZE = 500;
-export const EXPORT_FORMAT_VERSION = 1;
+/**
+ * Bumped whenever an exported collection's shape changes, so a future importer can tell formats
+ * apart (FR-9.3). History:
+ * - 1: initial (P10).
+ * - 2: `reviewSchedules[].isSuspended` removed — suspension lives only on `topics[].isSuspended`
+ *   (R2, one suspend flag). A v1 schedule with `isSuspended: true` maps to its topic's flag.
+ */
+export const EXPORT_FORMAT_VERSION = 2;
 
 async function* paginate<T>(
   fetchPage: (skip: number, take: number) => Promise<T[]>,

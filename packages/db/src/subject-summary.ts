@@ -47,8 +47,13 @@ export async function computeSubjectSummary(
     rootScores.length > 0 ? rootScores.reduce((sum, s) => sum + s, 0) / rootScores.length : null;
 
   const today = startOfUserDay(asOfDate, settings.timezone, settings.dayStartHour);
+  // Same eligibility as the review queue: suspended topics are never "due".
+  const suspendedTopicIds = new Set(topics.filter((t) => t.isSuspended).map((t) => t.id));
   const dueTodayCount = schedules.filter(
-    (s) => !s.isSuspended && s.nextReviewOn !== null && s.nextReviewOn.getTime() <= today.getTime(),
+    (s) =>
+      !suspendedTopicIds.has(s.topicId) &&
+      s.nextReviewOn !== null &&
+      s.nextReviewOn.getTime() <= today.getTime(),
   ).length;
 
   let lastActivityOn: Date | null = null;

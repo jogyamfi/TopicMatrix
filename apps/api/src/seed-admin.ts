@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { parseConfig } from '@topicmatrix/shared';
+import { createUserWithDefaultSettings } from '@topicmatrix/db';
 import { createNodeDb } from '@topicmatrix/db/node';
 import { createPasswordService, randomOpaqueToken } from '@topicmatrix/api-core';
 
@@ -40,7 +41,7 @@ async function main(): Promise<void> {
     const temporaryPassword = process.env.SEED_ADMIN_PASSWORD ?? randomOpaqueToken(9);
     const passwordHash = await passwordService.hash(temporaryPassword);
 
-    const admin = await db.users.create({
+    const admin = await createUserWithDefaultSettings(db, {
       email: ADMIN_EMAIL,
       emailNormalised: ADMIN_EMAIL.toLowerCase(),
       passwordHash,
@@ -48,7 +49,6 @@ async function main(): Promise<void> {
       role: 'ADMIN',
       mustChangePassword: true,
     });
-    await db.userSettings.createDefault(admin.id);
 
     console.log(
       JSON.stringify({

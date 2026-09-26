@@ -189,4 +189,85 @@ describe('topic tree operations (real database) — delivery-plan.md P4', () => 
       ).resolves.toMatchObject({ name: 'Algebra' });
     });
   });
+  describe('sibling order (R2 D-5)', () => {
+    async function order(userId: string, subjectId: string, parentId: string | null): Promise<string[]> {
+      const topics = await ctx.db.topics.listBySubject(userId, subjectId);
+      return topics.filter((t) => t.parentId === parentId).map((t) => t.name);
+    }
+
+    it('appends new topics after their existing siblings', async () => {
+      const user = await ctx.fixtures.createUser();
+      const subject = await ctx.fixtures.createSubject(user.id);
+      for (const name of ['First', 'Second', 'Third']) {
+        await ctx.db.topics.create(user.id, { subjectId: subject.id, name });
+      }
+      const topics = await ctx.db.topics.listBySubject(user.id, subject.id);
+      expect(topics.map((t) => [t.name, t.sortOrder])).toEqual([
+        ['First', 0],
+        ['Second', 1],
+        ['Third', 2],
+      ]);
+    });
+
+    it('moves a topic to a position among its siblings, renumbering the group', async () => {
+      const user = await ctx.fixtures.createUser();
+      const subject = await ctx.fixtures.createSubject(user.id);
+      const [a, , c] = [
+        await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'A' }),
+        await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'B' }),
+        await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'C' }),
+      ];
+
+      await moveTopic(ctx.db, user.id, c.id, { position: 0 });
+      expect(await order(user.id, subject.id, null)).toEqual(['C', 'A', 'B']);
+
+      await moveTopic(ctx.db, user.id, a.id, { position: 2 });
+      expect(await order(user.id, subject.id, null)).toEqual(['C', 'B', 'A']);
+
+      const sortOrders = (await ctx.db.topics.listBySubject(user.id, subject.id)).map((t) => t.sortOrder);
+      expect(sortOrders).toEqual([0, 1, 2]);
+    });
+
+    it('reorders siblings that all started tied at sortOrder 0 (pre-R2 data)', async () => {
+      const user = await ctx.fixtures.createUser();
+      const subject = await ctx.fixtures.createSubject(user.id);
+      for (const name of ['A', 'B', 'C']) {
+        await ctx.db.topics.create(user.id, { subjectId: subject.id, name, sortOrder: 0 });
+      }
+      const b = (await ctx.db.topics.listBySubject(user.id, subject.id)).find((t) => t.name === 'B');
+      if (!b) throw new Error('topic B missing');
+
+      await moveTopic(ctx.db, user.id, b.id, { position: 0 });
+      expect(await order(user.id, subject.id, null)).toEqual(['B', 'A', 'C']);
+    });
+
+    it('puts a re-parented topic last among its new siblings unless a position is given', async () => {
+      const user = await ctx.fixtures.createUser();
+      const subject = await ctx.fixtures.createSubject(user.id);
+      const parent = await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'Parent' });
+      await ctx.db.topics.create(user.id, { subjectId: subject.id, parentId: parent.id, name: 'Existing 1' });
+      await ctx.db.topics.create(user.id, { subjectId: subject.id, parentId: parent.id, name: 'Existing 2' });
+      const mover = await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'Mover' });
+      const other = await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'Other' });
+
+      await moveTopic(ctx.db, user.id, mover.id, { parentId: parent.id });
+      expect(await order(user.id, subject.id, parent.id)).toEqual(['Existing 1', 'Existing 2', 'Mover']);
+
+      await moveTopic(ctx.db, user.id, other.id, { parentId: parent.id, position: 1 });
+      expect(await order(user.id, subject.id, parent.id)).toEqual(['Existing 1', 'Other', 'Existing 2', 'Mover']);
+    });
+
+    it('promote-delete puts the children where the deleted topic was', async () => {
+      const user = await ctx.fixtures.createUser();
+      const subject = await ctx.fixtures.createSubject(user.id);
+      await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'Before' });
+      const doomed = await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'Doomed' });
+      await ctx.db.topics.create(user.id, { subjectId: subject.id, name: 'After' });
+      await ctx.db.topics.create(user.id, { subjectId: subject.id, parentId: doomed.id, name: 'Child 1' });
+      await ctx.db.topics.create(user.id, { subjectId: subject.id, parentId: doomed.id, name: 'Child 2' });
+
+      await deleteTopic(ctx.db, user.id, doomed.id, 'promote');
+      expect(await order(user.id, subject.id, null)).toEqual(['Before', 'Child 1', 'Child 2', 'After']);
+    });
+  });
 });

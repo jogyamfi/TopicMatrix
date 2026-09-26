@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { parseConfig } from '@topicmatrix/shared';
-import type { Db } from '@topicmatrix/db';
+import { applyScheduleOverride, recalculateTopicSchedule, type Db } from '@topicmatrix/db';
 import { createNodeDb } from '@topicmatrix/db/node';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -89,10 +89,8 @@ async function seedTopic(
   });
 
   const sessionCount = 3 + (counter % 4);
-  let lastStudiedOn = daysAgo(0);
   for (let i = sessionCount; i > 0; i -= 1) {
     const studiedOn = daysAgo(i * 5 + (counter % 3));
-    lastStudiedOn = studiedOn;
     const attempted = 8 + (counter % 5);
     const correct = Math.max(1, attempted - (i % 4));
     const confidence = 1 + ((counter + i) % 5);
@@ -105,18 +103,13 @@ async function seedTopic(
       confidence,
       sourceLabel: pick(['Past paper', 'Textbook', 'Question bank'], counter + i),
     });
-
-    await db.competencySnapshots.create(userId, topic.id, {
-      capturedOn: studiedOn,
-      score: 40 + ((counter * 7 + i * 11) % 55),
-      accuracyComponent: correct / attempted,
-      confidenceComponent: (confidence - 1) / 4,
-      recencyComponent: 0.5,
-    });
   }
 
-  // Spread schedules across overdue / due today / due soon / future so the queue (P8) is never
-  // trivially empty (FR-D.10).
+  // Schedule + snapshot history derived from the sessions, exactly as a real session write does.
+  await recalculateTopicSchedule(db, userId, topic.id);
+
+  // Then spread due dates across overdue / due today / due soon / future so the queue (P8) is
+  // never trivially empty (FR-D.10).
   const bucket = counter % 4;
   const nextReviewOn =
     bucket === 0
@@ -126,14 +119,7 @@ async function seedTopic(
         : bucket === 2
           ? daysFromNow(3)
           : daysFromNow(14);
-
-  await db.reviewSchedules.upsert(userId, topic.id, {
-    algorithm: 'fsrs',
-    lastReviewedOn: lastStudiedOn,
-    nextReviewOn,
-    intervalDays: bucket === 3 ? 14 : 7,
-    repetitions: sessionCount,
-  });
+  await applyScheduleOverride(db, userId, topic.id, { kind: 'setNextReviewOn', nextReviewOn }, new Date());
 
   for (const child of seed.children ?? []) {
     await seedTopic(db, userId, subjectId, child, topic.id, counter + 1);

@@ -28,16 +28,17 @@ export const updateTopicRequestSchema = z
 export type UpdateTopicRequest = z.infer<typeof updateTopicRequestSchema>;
 
 // Cross-subject re-parenting is allowed (FR-3.5): when parentId is given, its subject wins over
-// an explicit subjectId — see packages/db/src/topic-tree.ts's moveTopic.
+// an explicit subjectId — see packages/db/src/topic-tree.ts's moveTopic. `position` is the
+// 0-based slot among the destination's siblings (clamped); the server renumbers the group.
 export const moveTopicRequestSchema = z
   .object({
     parentId: z.string().min(1).nullable().optional(),
     subjectId: z.string().min(1).optional(),
-    sortOrder: z.number().int().optional(),
+    position: z.number().int().min(0).optional(),
   })
   .refine(
-    (v) => v.parentId !== undefined || v.subjectId !== undefined || v.sortOrder !== undefined,
-    { message: 'At least one of parentId, subjectId or sortOrder must be provided' },
+    (v) => v.parentId !== undefined || v.subjectId !== undefined || v.position !== undefined,
+    { message: 'At least one of parentId, subjectId or position must be provided' },
   );
 export type MoveTopicRequest = z.infer<typeof moveTopicRequestSchema>;
 

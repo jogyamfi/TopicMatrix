@@ -46,7 +46,7 @@ export function EditTopicDialog({ topic, onOpenChange }: Props): React.JSX.Eleme
     setNotes(topic.notes ?? '');
     setAlgorithmOverride((topic.algorithmOverride as Algorithm | null) ?? 'inherit');
     setError(null);
-  }, [topic]);
+  }, [topic?.id]);
 
   const saveMutation = useMutation({
     mutationFn: () => {

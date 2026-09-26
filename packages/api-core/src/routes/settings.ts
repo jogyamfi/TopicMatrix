@@ -5,13 +5,12 @@ import {
   stringifyManualIntervals,
   updateUserSettingsRequestSchema,
   settingsPreviewRequestSchema,
-  DEFAULT_MANUAL_INTERVALS,
   DEFAULT_STRONG_THRESHOLD,
   DEFAULT_NEEDS_REVIEW_THRESHOLD,
 } from '@topicmatrix/shared';
 import type { UpdateUserSettingsInput } from '@topicmatrix/db';
 import { validateScoringWeights, DEFAULT_SCORING_WEIGHTS } from '@topicmatrix/core';
-import { computeSettingsPreview } from '@topicmatrix/db';
+import { computeSettingsPreview, updateSettingsAndReschedule } from '@topicmatrix/db';
 import type { UserSettings } from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { parseJsonBody } from '../validation.js';
@@ -89,8 +88,10 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
       patch.manualIntervalsJson = stringifyManualIntervals(manualIntervals);
     }
 
-    const updated = await deps.db.userSettings.update(user.id, patch);
-    return c.json({ settings: toSettingsView(updated) });
+    // A new default algorithm or manual ladder re-derives the affected topics' schedules
+    // (FR-5.7); `schedulesChanged` counts the next-review dates that moved.
+    const { settings, schedulesChanged } = await updateSettingsAndReschedule(deps.db, user.id, patch);
+    return c.json({ settings: toSettingsView(settings), schedulesChanged });
   });
 
   // Resets only the scoring-weight/threshold fields to their platform defaults (FR-8.2's
@@ -104,7 +105,6 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
       weightRecency: DEFAULT_SCORING_WEIGHTS.recency,
       strongThreshold: DEFAULT_STRONG_THRESHOLD,
       needsReviewThreshold: DEFAULT_NEEDS_REVIEW_THRESHOLD,
-      manualIntervalsJson: stringifyManualIntervals([...DEFAULT_MANUAL_INTERVALS]),
     });
     return c.json({ settings: toSettingsView(updated) });
   });

@@ -1,20 +1,43 @@
 import { AppError } from '@topicmatrix/shared';
 import type { Db } from './db.js';
-import type { Topic } from './types.js';
+import type { Topic, TransactionClient } from './types.js';
+import { SIBLING_ORDER } from './repositories/topic.js';
+import { recalculateTopicSchedulesInTx } from './scheduling.js';
 
 export interface MoveTopicInput {
   /** `undefined` = keep current parent; `null` = move to the subject's root. */
   parentId?: string | null;
   /** Only consulted when `parentId` is omitted or `null` (moving a root topic to another subject's root). */
   subjectId?: string;
-  sortOrder?: number;
+  /**
+   * 0-based position among the destination's siblings (clamped). Omitted: stays where it is if
+   * the parent doesn't change, otherwise goes last.
+   */
+  position?: number;
 }
 
 /**
- * Re-parents a topic (optionally across subjects, FR-3.5) and/or reorders it, rewriting the
- * materialised `path`/`depth` of the topic and every descendant in one batch (delivery-plan.md
- * P4 tasks 4-5). Rejects a move onto the topic itself or any of its own descendants (FR-3.4,
- * `TOPIC_CYCLE`) before writing anything.
+ * Writes `sortOrder = index` for each topic in `orderedIds` whose value differs — keeps a sibling
+ * group dense and tie-free, so "move up/down" is always a real change (never 0 swapped with 0).
+ */
+async function renumberSiblings(
+  tx: TransactionClient,
+  ordered: readonly Pick<Topic, 'id' | 'sortOrder'>[],
+): Promise<void> {
+  for (let index = 0; index < ordered.length; index += 1) {
+    const node = ordered[index];
+    if (node && node.sortOrder !== index) {
+      await tx.topic.update({ where: { id: node.id }, data: { sortOrder: index } });
+    }
+  }
+}
+
+/**
+ * Re-parents a topic (optionally across subjects, FR-3.5) and/or reorders it among its siblings,
+ * rewriting the materialised `path`/`depth` of the topic and every descendant in one batch
+ * (delivery-plan.md P4 tasks 4-5). Rejects a move onto the topic itself or any of its own
+ * descendants (FR-3.4, `TOPIC_CYCLE`) before writing anything. A move to another subject
+ * re-derives the moved topics' schedules, since the subject's default algorithm may differ.
  */
 export async function moveTopic(
   db: Db,
@@ -59,43 +82,66 @@ export async function moveTopic(
       newSubjectId = subject.id;
     }
 
-    // Sibling-name uniqueness (FR-3.3, application-level — see prisma/model.prisma's comment).
-    const sibling = await tx.topic.findFirst({
-      where: {
-        subjectId: newSubjectId,
-        parentId: newParentId,
-        nameNormalised: topic.nameNormalised,
-        NOT: { id: topic.id },
-      },
-    });
-    if (sibling) {
-      throw new AppError('CONFLICT', 'A sibling topic with this name already exists');
-    }
+    const parentChanged = newParentId !== topic.parentId || newSubjectId !== topic.subjectId;
 
-    const oldPrefix = topic.path;
-    const newPath = `${newParentPath}${topic.id}/`;
-    const depthDelta = newDepth - topic.depth;
-
-    // `path: { startsWith: oldPrefix }` includes the topic itself (its own path equals the
-    // prefix) as well as every descendant — one batch covers both.
-    const subtree = await tx.topic.findMany({ where: { path: { startsWith: oldPrefix } } });
-    for (const node of subtree) {
-      const suffix = node.path.slice(oldPrefix.length);
-      await tx.topic.update({
-        where: { id: node.id },
-        data: {
-          path: `${newPath}${suffix}`,
-          depth: node.depth + depthDelta,
+    if (parentChanged) {
+      // Sibling-name uniqueness (FR-3.3, application-level — see prisma/model.prisma's comment).
+      const sibling = await tx.topic.findFirst({
+        where: {
           subjectId: newSubjectId,
-          ...(node.id === topic.id
-            ? {
-                parentId: newParentId,
-                ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
-              }
-            : {}),
+          parentId: newParentId,
+          nameNormalised: topic.nameNormalised,
+          NOT: { id: topic.id },
         },
       });
+      if (sibling) {
+        throw new AppError('CONFLICT', 'A sibling topic with this name already exists');
+      }
+
+      const oldPrefix = topic.path;
+      const newPath = `${newParentPath}${topic.id}/`;
+      const depthDelta = newDepth - topic.depth;
+
+      // `path: { startsWith: oldPrefix }` includes the topic itself (its own path equals the
+      // prefix) as well as every descendant — one batch covers both.
+      const subtree = await tx.topic.findMany({ where: { path: { startsWith: oldPrefix } } });
+      for (const node of subtree) {
+        const suffix = node.path.slice(oldPrefix.length);
+        await tx.topic.update({
+          where: { id: node.id },
+          data: {
+            path: `${newPath}${suffix}`,
+            depth: node.depth + depthDelta,
+            subjectId: newSubjectId,
+            ...(node.id === topic.id ? { parentId: newParentId } : {}),
+          },
+        });
+      }
+
+      if (newSubjectId !== topic.subjectId) {
+        await recalculateTopicSchedulesInTx(
+          tx,
+          userId,
+          subtree.filter((node) => node.algorithmOverride === null).map((node) => node.id),
+        );
+      }
     }
+
+    // Place the topic among its (new) siblings and renumber that group densely.
+    const group = await tx.topic.findMany({
+      where: { subjectId: newSubjectId, parentId: newParentId },
+      orderBy: SIBLING_ORDER,
+      select: { id: true, sortOrder: true },
+    });
+    const self = group.find((node) => node.id === topic.id);
+    const others = group.filter((node) => node.id !== topic.id);
+    const currentIndex = group.findIndex((node) => node.id === topic.id);
+    const requested = input.position ?? (parentChanged ? others.length : currentIndex);
+    const position = Math.min(Math.max(requested, 0), others.length);
+    if (self) {
+      others.splice(position, 0, self);
+    }
+    await renumberSiblings(tx, others);
 
     return tx.topic.findFirstOrThrow({ where: { id: topic.id } });
   });
@@ -127,6 +173,7 @@ export async function deleteTopic(
       // Children take the position the deleted topic occupied — same depth it was at.
       const newParentDepth = topic.depth;
       const children = await tx.topic.findMany({ where: { parentId: topic.id } });
+      const promotedChildIds = new Set(children.map((child) => child.id));
 
       for (const child of children) {
         const conflict = await tx.topic.findFirst({
@@ -161,6 +208,24 @@ export async function deleteTopic(
           });
         }
       }
+
+      // The promoted children take the deleted topic's place in its sibling order.
+      const group = await tx.topic.findMany({
+        where: { subjectId: topic.subjectId, parentId: topic.parentId },
+        orderBy: SIBLING_ORDER,
+        select: { id: true, sortOrder: true },
+      });
+      const promoted = group.filter((node) => promotedChildIds.has(node.id));
+      const ordered: Pick<Topic, 'id' | 'sortOrder'>[] = [];
+      for (const node of group) {
+        if (promotedChildIds.has(node.id)) continue;
+        if (node.id === topic.id) {
+          ordered.push(...promoted);
+          continue;
+        }
+        ordered.push(node);
+      }
+      await renumberSiblings(tx, ordered);
     }
 
     // cascade: everything still under the topic's own path prefix (the whole subtree).

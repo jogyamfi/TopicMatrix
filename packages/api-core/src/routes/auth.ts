@@ -7,7 +7,7 @@ import {
   normaliseKey,
   roleSchema,
 } from '@topicmatrix/shared';
-import type { User } from '@topicmatrix/db';
+import { rotateRefreshToken, type User } from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
 import { createTokenService } from '../auth/tokens.js';
 import { parseJsonBody } from '../validation.js';
@@ -15,6 +15,16 @@ import { recordAudit } from '../audit.js';
 import { getAuthUser, requireAuth } from '../middleware/auth.js';
 
 const REFRESH_COOKIE_NAME = 'refreshToken';
+
+/**
+ * How long a just-rotated refresh token is still honoured. Two tabs whose access tokens expire
+ * together both refresh with the SAME cookie: the first rotates it, and without this window the
+ * second would be rejected — and its "clear the cookie" response would log BOTH tabs out. Within
+ * the window the second request gets an access token and leaves the cookie alone (the browser
+ * already holds the successor the first response set). Presenting a rotated token after the
+ * window is treated as token theft (§11.2 A07): every session of that user is revoked.
+ */
+export const REFRESH_REUSE_GRACE_MS = 30_000;
 
 // A real, validly-encoded Argon2id hash (default params, fixed all-zero salt) of a fixed,
 // non-secret string — NOT anyone's password. Compared against on every login for an unknown
@@ -72,6 +82,9 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
       throw new AppError('UNAUTHORIZED', 'Invalid email or password');
     }
 
+    // Housekeeping: drop this user's expired and long-revoked refresh tokens.
+    await deps.db.refreshTokens.purgeStaleForUser(user.id, deps.clock());
+
     if (passwordService.needsRehash(user.passwordHash)) {
       const rehashed = await passwordService.hash(body.password);
       await deps.db.users.update(user.id, { passwordHash: rehashed });
@@ -104,8 +117,33 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     const tokenService = createTokenService(deps.config.jwtSecret);
     const tokenHash = await tokenService.hashRefreshToken(token);
     const existing = await deps.db.refreshTokens.findByTokenHash(tokenHash);
+    const now = deps.clock();
 
-    if (!existing || existing.revokedAt || existing.expiresAt.getTime() < deps.clock().getTime()) {
+    if (!existing || existing.expiresAt.getTime() < now.getTime()) {
+      deleteCookie(c, REFRESH_COOKIE_NAME, { path: '/' });
+      throw new AppError('UNAUTHORIZED', 'Refresh token is invalid or expired');
+    }
+
+    if (existing.revokedAt) {
+      const wasRotated = existing.replacedByTokenId !== null;
+      const withinGrace = now.getTime() - existing.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
+      if (wasRotated && withinGrace) {
+        // A concurrent refresh (another tab) — see REFRESH_REUSE_GRACE_MS. No cookie change.
+        const user = await deps.db.users.findById(existing.userId);
+        if (!user || !user.isActive) {
+          throw new AppError('UNAUTHORIZED', 'Account is inactive or no longer exists');
+        }
+        const accessToken = await tokenService.signAccessToken({
+          userId: user.id,
+          role: roleSchema.parse(user.role),
+        });
+        return c.json({ accessToken, user: toPublicUser(user) });
+      }
+      if (wasRotated) {
+        // A long-rotated token being replayed: assume it was stolen, end every session.
+        await deps.db.refreshTokens.revokeAllForUser(existing.userId);
+        await recordAudit(deps, { actorId: existing.userId, action: 'auth.refresh.reuse_detected' });
+      }
       deleteCookie(c, REFRESH_COOKIE_NAME, { path: '/' });
       throw new AppError('UNAUTHORIZED', 'Refresh token is invalid or expired');
     }
@@ -116,13 +154,15 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
       throw new AppError('UNAUTHORIZED', 'Account is inactive or no longer exists');
     }
 
-    // Rotating: revoke the presented token, issue a fresh one.
-    await deps.db.refreshTokens.revoke(user.id, existing.id);
+    // Rotating: revoke the presented token as replaced by a fresh one, atomically.
     const rotated = await tokenService.issueRefreshToken();
-    await deps.db.refreshTokens.create(user.id, {
-      tokenHash: rotated.tokenHash,
-      expiresAt: rotated.expiresAt,
-    });
+    await rotateRefreshToken(
+      deps.db,
+      user.id,
+      existing.id,
+      { tokenHash: rotated.tokenHash, expiresAt: rotated.expiresAt },
+      now,
+    );
     setRefreshCookie(c, rotated.token, rotated.expiresAt);
 
     const accessToken = await tokenService.signAccessToken({

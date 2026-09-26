@@ -33,6 +33,17 @@ export interface TopicRepository {
   delete(userId: string, topicId: string): Promise<void>;
 }
 
+/**
+ * Sibling display order: `sortOrder`, then creation order, then id — ties can't reorder between
+ * reads. New topics are appended after their existing siblings (`create` below), and moves
+ * renumber the affected sibling group densely (topic-tree.ts), so ties are rare anyway.
+ */
+export const SIBLING_ORDER = [
+  { sortOrder: 'asc' as const },
+  { createdAt: 'asc' as const },
+  { id: 'asc' as const },
+];
+
 export function createTopicRepository(client: PrismaClientOrTx): TopicRepository {
   async function findOwned(userId: string, topicId: string): Promise<Topic> {
     const topic = await client.topic.findFirst({ where: { id: topicId, subject: { userId } } });
@@ -46,12 +57,12 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
     listBySubject: (userId, subjectId) =>
       client.topic.findMany({
         where: { subjectId, subject: { userId } },
-        orderBy: { sortOrder: 'asc' },
+        orderBy: SIBLING_ORDER,
       }),
     listAllForUser: (userId, opts) =>
       client.topic.findMany({
         where: { subject: { userId } },
-        orderBy: { sortOrder: 'asc' },
+        orderBy: SIBLING_ORDER,
         ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
         ...(opts?.take !== undefined ? { take: opts.take } : {}),
       }),
@@ -91,6 +102,16 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
         throw new AppError('CONFLICT', 'A sibling topic with this name already exists');
       }
 
+      // Appended after the existing siblings unless the caller asks for a specific position.
+      const sortOrder =
+        input.sortOrder ??
+        ((
+          await client.topic.aggregate({
+            where: { subjectId: input.subjectId, parentId: input.parentId ?? null },
+            _max: { sortOrder: true },
+          })
+        )._max.sortOrder ?? -1) + 1;
+
       // Generated up front (rather than left to Prisma's @default(cuid())) so it can be folded
       // into `path` before the row is inserted.
       const id = crypto.randomUUID();
@@ -102,7 +123,7 @@ export function createTopicRepository(client: PrismaClientOrTx): TopicRepository
           name: input.name,
           nameNormalised,
           notes: input.notes ?? null,
-          sortOrder: input.sortOrder ?? 0,
+          sortOrder,
           algorithmOverride: input.algorithmOverride ?? null,
           depth,
           path: `${path}${id}/`,

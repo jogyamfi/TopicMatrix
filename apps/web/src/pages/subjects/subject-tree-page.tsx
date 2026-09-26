@@ -67,7 +67,7 @@ export default function SubjectTreePage(): React.JSX.Element {
   const [logTarget, setLogTarget] = useState<TopicTreeNodeView | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
 
-  const move = async (topicId: string, body: { parentId?: string | null; sortOrder?: number }) => {
+  const move = async (topicId: string, body: { parentId?: string | null; position?: number }) => {
     try {
       await apiFetch(`/topics/${topicId}/move`, topicResponseSchema, { method: 'POST', body });
     } catch (err) {
@@ -91,11 +91,10 @@ export default function SubjectTreePage(): React.JSX.Element {
     index: number,
     direction: 'up' | 'down',
   ) => {
-    const swapIndex = direction === 'up' ? index - 1 : index + 1;
-    const other = siblings[swapIndex];
-    if (!other) return;
-    await move(node.id, { sortOrder: other.sortOrder });
-    await move(other.id, { sortOrder: node.sortOrder });
+    const position = direction === 'up' ? index - 1 : index + 1;
+    if (position < 0 || position >= siblings.length) return;
+    // One call: the server places the topic at `position` and renumbers the sibling group.
+    await move(node.id, { position });
     await invalidations.afterTopicWrite(id);
   };
 

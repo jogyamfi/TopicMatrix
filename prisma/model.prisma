@@ -84,6 +84,9 @@ model Topic {
   depth              Int      @default(0)
   path               String
   algorithmOverride  String?
+  // The ONE suspend flag (FR-5.10) — excluded from the review queue and due counts. Lives on the
+  // topic rather than the schedule so a never-studied topic (no ReviewSchedule row) can be
+  // suspended too. ReviewSchedule had its own copy until R2; it was merged in here.
   isSuspended        Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -139,7 +142,6 @@ model ReviewSchedule {
   stability         Float?
   difficulty        Float?
   manualLadderIndex Int?
-  isSuspended       Boolean   @default(false)
   updatedAt         DateTime  @updatedAt
 
   topic Topic @relation(fields: [topicId], references: [id], onDelete: Restrict)
@@ -190,9 +192,15 @@ model TopicTag {
 model RefreshToken {
   id         String    @id @default(cuid())
   userId     String
-  tokenHash  String
+  // Looked up on every refresh — unique (hashes of 256-bit random tokens never collide), which
+  // also gives it an index.
+  tokenHash  String    @unique
   expiresAt  DateTime
   revokedAt  DateTime?
+  // Set when this token was revoked by ROTATION (not logout/password change): the id of the token
+  // that replaced it. Distinguishes a concurrent refresh from another tab (just rotated — allowed
+  // within a short grace window) from reuse of a stolen, long-rotated token (revokes everything).
+  replacedByTokenId String?
   createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Restrict)

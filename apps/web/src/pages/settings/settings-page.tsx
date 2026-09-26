@@ -12,7 +12,7 @@ import {
 import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { invalidations } from '../../lib/invalidations';
-import { toast } from '../../lib/toast-store';
+import { toast, toastSchedulesChanged } from '../../lib/toast-store';
 import { describeError } from '../admin/users-page';
 import { HealthStatusBadge, type HealthStatus } from '../../components/health-status-badge';
 import { Button } from '../../components/ui/button';
@@ -183,6 +183,7 @@ export default function SettingsPage(): React.JSX.Element {
       await invalidations.afterSettingsWrite();
       setForm(data.settings);
       toast({ title: 'Settings saved' });
+      toastSchedulesChanged(data.schedulesChanged);
     },
     onError: (err) => toast({ title: 'Could not save settings', description: describeError(err), variant: 'destructive' }),
   });

@@ -10,8 +10,10 @@ import {
 } from '@topicmatrix/shared';
 import { computeGrade } from '@topicmatrix/core';
 import {
-  recalculateTopicSchedule,
   applyScheduleOverride,
+  deleteStudySession,
+  logStudySession,
+  updateStudySession,
   type ScheduleOverride,
   type StudySession,
   type ReviewSchedule,
@@ -39,7 +41,8 @@ function toSessionView(session: StudySession) {
   };
 }
 
-function toScheduleView(schedule: ReviewSchedule | null) {
+/** `isSuspended` is the topic's flag (the one suspend flag), reported alongside its schedule. */
+function toScheduleView(schedule: ReviewSchedule | null, isSuspended: boolean) {
   if (!schedule) {
     return null;
   }
@@ -55,7 +58,7 @@ function toScheduleView(schedule: ReviewSchedule | null) {
     stability: schedule.stability,
     difficulty: schedule.difficulty,
     manualLadderIndex: schedule.manualLadderIndex,
-    isSuspended: schedule.isSuspended,
+    isSuspended,
   };
 }
 
@@ -98,8 +101,9 @@ function parseOptionalDateQuery(c: Context<AppEnv>, key: string): Date | undefin
 
 /**
  * Study sessions, scoring and scheduling integration (FR-4.*, FR-5.*, delivery-plan.md P5).
- * Every session write triggers a full replay-based recalculation of the topic's schedule and a
- * new competency snapshot (`recalculateTopicSchedule`, §8.6/FR-7.10) — never an incremental patch.
+ * Every session write triggers a full replay-based recalculation of the topic's schedule and
+ * snapshot history (§8.6/FR-7.10), committed together with the write itself (see
+ * packages/db/src/session-writes.ts) — never an incremental patch.
  */
 export function registerSessionRoutes(app: Hono<AppEnv>): void {
   app.get('/topics/:id/sessions', requireAuth, requirePasswordChanged, async (c) => {
@@ -135,7 +139,7 @@ export function registerSessionRoutes(app: Hono<AppEnv>): void {
       });
     }
 
-    const session = await deps.db.studySessions.create(user.id, {
+    const { session, recalculation } = await logStudySession(deps.db, user.id, {
       topicId,
       studiedOn,
       questionsAttempted: body.questionsAttempted,
@@ -149,13 +153,11 @@ export function registerSessionRoutes(app: Hono<AppEnv>): void {
       }),
     });
 
-    const recalculation = await recalculateTopicSchedule(deps.db, user.id, topicId, {
-      asOfDate: now,
-      triggeredBySessionId: session.id,
-    });
-
     return c.json(
-      { session: toSessionView(session), schedule: toScheduleView(recalculation.schedule) },
+      {
+        session: toSessionView(session),
+        schedule: toScheduleView(recalculation.schedule, recalculation.isSuspended),
+      },
       201,
     );
   });
@@ -199,31 +201,27 @@ export function registerSessionRoutes(app: Hono<AppEnv>): void {
       }
     }
 
-    const session = await deps.db.studySessions.update(user.id, sessionId, withoutUndefined(body));
-    const recalculation = await recalculateTopicSchedule(deps.db, user.id, existing.topicId, {
-      asOfDate: deps.clock(),
-      triggeredBySessionId: session.id,
-    });
+    const { session, recalculation } = await updateStudySession(
+      deps.db,
+      user.id,
+      sessionId,
+      withoutUndefined(body),
+    );
 
-    return c.json({ session: toSessionView(session), schedule: toScheduleView(recalculation.schedule) });
+    return c.json({
+      session: toSessionView(session),
+      schedule: toScheduleView(recalculation.schedule, recalculation.isSuspended),
+    });
   });
 
   app.delete('/sessions/:id', requireAuth, requirePasswordChanged, async (c) => {
     const deps = c.get('deps');
     const user = getAuthUser(c);
-    const sessionId = c.req.param('id');
-
-    const existing = await deps.db.studySessions.findById(user.id, sessionId);
-    if (!existing) {
-      throw new AppError('NOT_FOUND', 'Study session not found');
-    }
-
-    await deps.db.studySessions.delete(user.id, sessionId);
-    const recalculation = await recalculateTopicSchedule(deps.db, user.id, existing.topicId, {
-      asOfDate: deps.clock(),
+    const { recalculation } = await deleteStudySession(deps.db, user.id, c.req.param('id'));
+    return c.json({
+      status: 'ok',
+      schedule: toScheduleView(recalculation.schedule, recalculation.isSuspended),
     });
-
-    return c.json({ status: 'ok', schedule: toScheduleView(recalculation.schedule) });
   });
 
   // Standalone schedule read (P7) — deferred at P5 pending a real consumer; the topic detail
@@ -237,7 +235,7 @@ export function registerSessionRoutes(app: Hono<AppEnv>): void {
       throw new AppError('NOT_FOUND', 'Topic not found');
     }
     const schedule = await deps.db.reviewSchedules.find(user.id, topicId);
-    return c.json({ schedule: toScheduleView(schedule) });
+    return c.json({ schedule: toScheduleView(schedule, topic.isSuspended) });
   });
 
   // Snapshot history for the retention curve, date-range filterable (FR-7.7's data source).
@@ -274,7 +272,7 @@ export function registerSessionRoutes(app: Hono<AppEnv>): void {
           ? { kind: 'snooze', days: body.days }
           : { kind: 'suspend', suspended: body.suspended };
 
-    const schedule = await applyScheduleOverride(deps.db, user.id, topicId, override, deps.clock());
-    return c.json({ schedule: toScheduleView(schedule) });
+    const result = await applyScheduleOverride(deps.db, user.id, topicId, override, deps.clock());
+    return c.json({ status: 'ok', schedule: toScheduleView(result.schedule, result.isSuspended) });
   });
 }

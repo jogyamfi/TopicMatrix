@@ -33,6 +33,8 @@ export interface SetupApiTestOptions {
   rateLimiterWindowMs?: number;
   clientIp?: string;
   configOverrides?: Partial<AppConfig>;
+  /** Replaces `deps.clock` (default: real time), for tests that need to move time forward. */
+  clock?: () => Date;
 }
 
 function testConfig(overrides: Partial<AppConfig>): AppConfig {
@@ -68,7 +70,7 @@ export async function setupApiTest(options: SetupApiTestOptions = {}): Promise<A
   const deps: AppDeps = {
     config,
     logger: createLogger('error'),
-    clock: () => new Date(),
+    clock: options.clock ?? (() => new Date()),
     rateLimiter: createMemoryRateLimiter({
       windowMs: options.rateLimiterWindowMs ?? 15 * 60 * 1000,
       maxAttempts: options.rateLimiterMaxAttempts ?? 10,

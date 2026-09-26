@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EXPORT_FORMAT_VERSION } from '@topicmatrix/db';
 import { setupApiTest, type ApiTestContext } from '../../test/setup.js';
 import { createPasswordService } from '../auth/password.js';
 import { createTokenService } from '../auth/tokens.js';
@@ -53,7 +54,8 @@ describe('export routes (FR-9.1-FR-9.3)', () => {
       tags: { id: string; name: string }[];
       topicTags: { topicId: string; tagId: string }[];
     };
-    expect(body.version).toBe(1);
+    expect(body.version).toBe(EXPORT_FORMAT_VERSION);
+    expect(EXPORT_FORMAT_VERSION).toBe(2);
     expect(body.user.id).toBe(userId);
     expect(body.subjects.map((s) => s.name)).toEqual(['Maths']);
     expect(body.topics.map((t) => t.name)).toEqual(['Algebra']);

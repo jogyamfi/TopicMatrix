@@ -12,7 +12,6 @@ export interface UpsertReviewScheduleInput {
   stability?: number | null;
   difficulty?: number | null;
   manualLadderIndex?: number | null;
-  isSuspended?: boolean;
 }
 
 export interface ReviewScheduleRepository {

@@ -241,9 +241,9 @@ export default function TopicDetailPage(): React.JSX.Element {
           <Button
             variant="outline"
             disabled={suspendMutation.isPending}
-            onClick={() => suspendMutation.mutate(!(schedule?.isSuspended ?? false))}
+            onClick={() => suspendMutation.mutate(!topic.isSuspended)}
           >
-            {schedule?.isSuspended ? (
+            {topic.isSuspended ? (
               <>
                 <Play /> Resume reviews
               </>
@@ -274,7 +274,7 @@ export default function TopicDetailPage(): React.JSX.Element {
             ) : (
               <p className="text-sm text-muted-foreground">Not scheduled yet</p>
             )}
-            {schedule?.isSuspended ? (
+            {topic.isSuspended ? (
               <Badge variant="secondary" className="mt-1">
                 Paused
               </Badge>
