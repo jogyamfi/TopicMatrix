@@ -40,6 +40,26 @@ export interface ReviewQueueBuckets {
   readonly overdue: ReviewQueueItem[];
   readonly dueToday: ReviewQueueItem[];
   readonly dueNext7Days: ReviewQueueItem[];
+  /**
+   * Never-studied topics (no schedule yet), oldest first, capped at `NOT_STARTED_LIMIT`. Not *due*
+   * (SRS Q2: a topic with nothing to review never enters the due buckets) but surfaced separately
+   * so a new learner's queue points at where to start instead of sitting empty.
+   */
+  readonly notStarted: ReviewQueueItem[];
+  /** How many never-studied topics exist in total (`notStarted` shows at most the first few). */
+  readonly notStartedTotal: number;
+  /** The earliest upcoming review (after today), for "nothing due — next review on …". */
+  readonly nextReviewOn: Date | null;
+}
+
+/** How many never-studied topics the queue lists. */
+export const NOT_STARTED_LIMIT = 10;
+
+interface EligibleTopics {
+  /** Scheduled, not suspended, not archived — the due-bucket and launcher candidates. */
+  readonly items: ReviewQueueItem[];
+  /** Not suspended, not archived, never scheduled — oldest first. */
+  readonly unscheduled: ReviewQueueItem[];
 }
 
 /**
@@ -53,7 +73,7 @@ async function computeEligibleTopicItems(
   db: Db,
   userId: string,
   asOfDate: Date,
-): Promise<ReviewQueueItem[]> {
+): Promise<EligibleTopics> {
   const settings = await db.userSettings.find(userId);
   if (!settings) {
     throw new AppError('NOT_FOUND', 'User settings not found');
@@ -82,6 +102,7 @@ async function computeEligibleTopicItems(
   };
 
   const items: ReviewQueueItem[] = [];
+  const unscheduled: { item: ReviewQueueItem; createdAt: Date }[] = [];
   for (const topic of topics) {
     const subject = subjectById.get(topic.subjectId);
     // Suspended topics and archived subjects are excluded (FR-5.10, FR-7.1).
@@ -90,6 +111,23 @@ async function computeEligibleTopicItems(
     }
     const schedule = scheduleByTopic.get(topic.id) ?? null;
     if (!schedule) {
+      unscheduled.push({
+        createdAt: topic.createdAt,
+        item: {
+          topicId: topic.id,
+          subjectId: topic.subjectId,
+          subjectName: subject.name,
+          name: topic.name,
+          notes: topic.notes,
+          score: null,
+          healthStatus: 'notStarted',
+          lastReviewedOn: null,
+          nextReviewOn: null,
+          overdueDays: 0,
+          accuracyTrend: null,
+          path: topic.path,
+        },
+      });
       continue;
     }
 
@@ -144,7 +182,10 @@ async function computeEligibleTopicItems(
       path: topic.path,
     });
   }
-  return items;
+  unscheduled.sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.item.topicId.localeCompare(b.item.topicId),
+  );
+  return { items, unscheduled: unscheduled.map((u) => u.item) };
 }
 
 /** FR-7.1's primary sort: overdue days descending, then competency score ascending (nulls last). */
@@ -170,7 +211,8 @@ export async function computeReviewQueue(
   const today = startOfUserDay(asOfDate, settings.timezone, settings.dayStartHour);
   const in7Days = new Date(today.getTime() + NEXT_7_DAYS_MS);
 
-  const items = (await computeEligibleTopicItems(db, userId, asOfDate)).filter(
+  const eligible = await computeEligibleTopicItems(db, userId, asOfDate);
+  const items = eligible.items.filter(
     (i): i is ReviewQueueItem & { nextReviewOn: Date } => i.nextReviewOn !== null,
   );
 
@@ -184,6 +226,13 @@ export async function computeReviewQueue(
     overdue: sortByOverdueDescScoreAsc(overdue),
     dueToday: sortByOverdueDescScoreAsc(dueToday),
     dueNext7Days: sortByOverdueDescScoreAsc(dueNext7Days),
+    notStarted: eligible.unscheduled.slice(0, NOT_STARTED_LIMIT),
+    notStartedTotal: eligible.unscheduled.length,
+    nextReviewOn: items.reduce<Date | null>(
+      (earliest, i) =>
+        i.nextReviewOn.getTime() > today.getTime() && (!earliest || i.nextReviewOn < earliest) ? i.nextReviewOn : earliest,
+      null,
+    ),
   };
 }
 
@@ -237,7 +286,7 @@ export async function buildReviewSession(
   }
   const today = startOfUserDay(asOfDate, settings.timezone, settings.dayStartHour);
 
-  let items = await computeEligibleTopicItems(db, userId, asOfDate);
+  let items = (await computeEligibleTopicItems(db, userId, asOfDate)).items;
 
   if (mode.kind === 'subject') {
     items = items.filter((i) => i.subjectId === mode.subjectId);

@@ -7,3 +7,4 @@ export * from './scoring.js';
 export * from './replay.js';
 export * from './streak.js';
 export * from './schedulers/registry.js';
+export * from './sample-preview.js';

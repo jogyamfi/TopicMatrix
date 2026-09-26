@@ -4,12 +4,13 @@ import { dashboardAnalyticsResponseSchema } from '@topicmatrix/shared';
 import { useAuth } from '../context/auth-context';
 import { apiFetch } from '../lib/api-client';
 import { queryKeys } from '../lib/query-client';
-import { describeError } from './admin/users-page';
+import { describeError } from '../lib/api-error';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/empty-state';
 import { ActivityCalendar } from '../components/activity-calendar';
 import { ReviewQueueSection } from './review/review-queue-section';
+import { OnboardingChecklist } from '../components/onboarding-checklist';
 
 function TodaySummaryCard({
   label,
@@ -74,6 +75,7 @@ export default function DashboardPage(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-6">
+      <OnboardingChecklist />
       <Card>
         <CardHeader>
           <CardTitle>Welcome back{user ? `, ${user.displayName}` : ''}</CardTitle>

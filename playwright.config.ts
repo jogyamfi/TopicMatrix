@@ -18,6 +18,9 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
+    // The server's DEFAULT_TIMEZONE, so the "your device is in another timezone" banner only
+    // appears in the test that sets a different one on purpose.
+    timezoneId: 'Europe/London',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

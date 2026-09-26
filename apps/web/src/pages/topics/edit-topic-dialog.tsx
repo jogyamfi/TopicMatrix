@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { topicResponseSchema, type Algorithm, type TopicView, type UpdateTopicRequest } from '@topicmatrix/shared';
-import { apiFetch, ApiError } from '../../lib/api-client';
+import {
+  topicResponseSchema,
+  updateTopicRequestSchema,
+  type Algorithm,
+  type TopicView,
+  type UpdateTopicRequest,
+} from '@topicmatrix/shared';
+import { apiFetch } from '../../lib/api-client';
+import { useFormErrors } from '../../lib/form-errors';
+import { FieldError, FormError } from '../../components/field-error';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
 import { Button } from '../../components/ui/button';
@@ -38,25 +46,20 @@ export function EditTopicDialog({ topic, onOpenChange }: Props): React.JSX.Eleme
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
   const [algorithmOverride, setAlgorithmOverride] = useState<Algorithm | 'inherit'>('inherit');
-  const [error, setError] = useState<string | null>(null);
+  const form = useFormErrors();
+  const { clear: clearErrors } = form;
 
   useEffect(() => {
     if (!topic) return;
     setName(topic.name);
     setNotes(topic.notes ?? '');
     setAlgorithmOverride((topic.algorithmOverride as Algorithm | null) ?? 'inherit');
-    setError(null);
-  }, [topic?.id]);
+    clearErrors();
+  }, [topic?.id, clearErrors]);
 
   const saveMutation = useMutation({
-    mutationFn: () => {
-      const body: UpdateTopicRequest = {
-        name,
-        notes: notes.trim().length > 0 ? notes : null,
-        algorithmOverride: algorithmOverride === 'inherit' ? null : algorithmOverride,
-      };
-      return apiFetch(`/topics/${topic?.id}`, topicResponseSchema, { method: 'PATCH', body });
-    },
+    mutationFn: (body: UpdateTopicRequest) =>
+      apiFetch(`/topics/${topic?.id}`, topicResponseSchema, { method: 'PATCH', body }),
     onSuccess: async (data) => {
       if (topic) await invalidations.afterTopicWrite(topic.subjectId);
       if (data.scheduleChanged) {
@@ -64,21 +67,24 @@ export function EditTopicDialog({ topic, onOpenChange }: Props): React.JSX.Eleme
       }
       onOpenChange(false);
     },
-    onError: (err) => {
-      setError(err instanceof ApiError ? err.message : 'Could not save topic');
-    },
+    onError: (err) => form.setFromApi(err, 'Could not save topic'),
   });
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    setError(null);
-    saveMutation.mutate();
+    const body: UpdateTopicRequest = {
+      name,
+      notes: notes.trim().length > 0 ? notes : null,
+      algorithmOverride: algorithmOverride === 'inherit' ? null : algorithmOverride,
+    };
+    if (!form.validate(updateTopicRequestSchema, body)) return;
+    saveMutation.mutate(body);
   };
 
   return (
     <Dialog open={topic !== null} onOpenChange={onOpenChange}>
       <DialogContent>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <DialogHeader>
             <DialogTitle>Edit topic</DialogTitle>
             <DialogDescription>Changing the algorithm re-derives the schedule from history.</DialogDescription>
@@ -86,11 +92,26 @@ export function EditTopicDialog({ topic, onOpenChange }: Props): React.JSX.Eleme
           <div className="grid gap-4 py-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="edit-topic-name">Name</Label>
-              <Input id="edit-topic-name" required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+              <Input
+                id="edit-topic-name"
+                required
+                maxLength={120}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                {...form.fieldProps('name', 'edit-topic-name')}
+              />
+              <FieldError inputId="edit-topic-name" message={form.errors.name} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="edit-topic-notes">Notes</Label>
-              <Textarea id="edit-topic-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <Textarea
+                id="edit-topic-notes"
+                rows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                {...form.fieldProps('notes', 'edit-topic-notes')}
+              />
+              <FieldError inputId="edit-topic-notes" message={form.errors.notes} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="edit-topic-algorithm">Algorithm</Label>
@@ -111,11 +132,7 @@ export function EditTopicDialog({ topic, onOpenChange }: Props): React.JSX.Eleme
                 </SelectContent>
               </Select>
             </div>
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
+            <FormError message={form.formError} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

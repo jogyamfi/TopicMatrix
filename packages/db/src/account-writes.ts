@@ -12,10 +12,14 @@ import type { RefreshToken, User } from './types.js';
 // revoked refresh token with no successor (a forced logout).
 
 /** A new user plus their default settings row (§6.1: every user has exactly one). */
-export function createUserWithDefaultSettings(db: Db, input: CreateUserInput): Promise<User> {
+export function createUserWithDefaultSettings(
+  db: Db,
+  input: CreateUserInput,
+  settings?: { timezone?: string },
+): Promise<User> {
   return db.unitOfWork.run(async (tx) => {
     const user = await createUserRepository(tx).create(input);
-    await createUserSettingsRepository(tx).createDefault(user.id);
+    await createUserSettingsRepository(tx).createDefault(user.id, settings);
     return user;
   });
 }

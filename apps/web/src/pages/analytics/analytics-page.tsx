@@ -11,7 +11,7 @@ import {
 } from '@topicmatrix/shared';
 import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
 import { EmptyState } from '../../components/empty-state';

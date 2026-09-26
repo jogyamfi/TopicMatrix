@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Plus, RotateCcw, X } from 'lucide-react';
+import { scoreSample, type ScoringSample } from '@topicmatrix/core';
 import {
   settingsPreviewResponseSchema,
+  updateUserSettingsRequestSchema,
   userSettingsResponseSchema,
+  type ScoringSampleView,
   type Algorithm,
   type UpdateUserSettingsRequest,
   type UserSettingsView,
@@ -13,7 +16,10 @@ import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { invalidations } from '../../lib/invalidations';
 import { toast, toastSchedulesChanged } from '../../lib/toast-store';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
+import { useFormErrors } from '../../lib/form-errors';
+import { allTimezones, browserTimezone } from '../../lib/timezones';
+import { FieldError, FormError } from '../../components/field-error';
 import { HealthStatusBadge, type HealthStatus } from '../../components/health-status-badge';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -23,21 +29,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 
 const ALGORITHM_LABELS: Record<Algorithm, string> = { fsrs: 'FSRS', sm2: 'SM-2', manual: 'Manual' };
-
-// A short, common subset — not exhaustive (Intl.supportedValuesOf('timeZone') isn't available in
-// every target browser); the field also accepts any free-typed IANA identifier, validated server-side.
-const COMMON_TIMEZONES = [
-  'Europe/London',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'America/New_York',
-  'America/Chicago',
-  'America/Los_Angeles',
-  'Asia/Tokyo',
-  'Asia/Kolkata',
-  'Australia/Sydney',
-  'UTC',
-];
 
 type FormState = UserSettingsView;
 
@@ -107,29 +98,36 @@ function ManualIntervalsEditor({
   );
 }
 
-function WeightPreview({ form }: { form: FormState }): React.JSX.Element {
+function toScoringSample(view: ScoringSampleView): ScoringSample {
+  return {
+    ...view,
+    asOfDate: new Date(view.asOfDate),
+    sessions: view.sessions.map((session) => ({ ...session, studiedOn: new Date(session.studiedOn) })),
+  };
+}
+
+/**
+ * Live preview of the proposed weights/thresholds on the user's busiest topic (FR-8.2). The
+ * sample's scoring inputs are fetched once; every keystroke then re-scores it locally with the
+ * same `scoreSample` the server uses — no request per change (R3 P-2).
+ */
+function WeightPreview({ form, saved }: { form: FormState; saved: FormState }): React.JSX.Element {
   const previewQuery = useQuery({
-    queryKey: [
-      'settings',
-      'preview',
-      form.weightAccuracy,
-      form.weightConfidence,
-      form.weightRecency,
-      form.strongThreshold,
-      form.needsReviewThreshold,
-    ],
+    queryKey: [...queryKeys.settings.detail(), 'preview-sample'],
     queryFn: () =>
       apiFetch('/me/settings/preview', settingsPreviewResponseSchema, {
         method: 'POST',
         body: {
-          weightAccuracy: form.weightAccuracy,
-          weightConfidence: form.weightConfidence,
-          weightRecency: form.weightRecency,
-          strongThreshold: form.strongThreshold,
-          needsReviewThreshold: form.needsReviewThreshold,
+          weightAccuracy: saved.weightAccuracy,
+          weightConfidence: saved.weightConfidence,
+          weightRecency: saved.weightRecency,
+          strongThreshold: saved.strongThreshold,
+          needsReviewThreshold: saved.needsReviewThreshold,
         },
       }),
   });
+  const preview = previewQuery.data?.preview ?? null;
+  const sample = useMemo(() => (preview ? toScoringSample(preview.sample) : null), [preview]);
 
   if (previewQuery.isPending) {
     return <Skeleton className="h-16 w-full" />;
@@ -137,13 +135,20 @@ function WeightPreview({ form }: { form: FormState }): React.JSX.Element {
   if (previewQuery.isError) {
     return <p className="text-sm text-muted-foreground">Preview unavailable: {describeError(previewQuery.error)}</p>;
   }
-  const { preview } = previewQuery.data;
-  if (!preview) {
+  if (!preview || !sample) {
     return <p className="text-sm text-muted-foreground">Log a session on any topic to see a live preview here.</p>;
   }
 
+  const proposed = scoreSample(sample, {
+    accuracy: form.weightAccuracy,
+    confidence: form.weightConfidence,
+    recency: form.weightRecency,
+    strongThreshold: form.strongThreshold,
+    needsReviewThreshold: form.needsReviewThreshold,
+  });
+
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-3 text-sm">
+    <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" aria-live="polite">
       <p className="text-muted-foreground">
         Effect on <strong className="text-foreground">{preview.topicName}</strong>:
       </p>
@@ -154,8 +159,8 @@ function WeightPreview({ form }: { form: FormState }): React.JSX.Element {
         </span>
         <span aria-hidden="true">&rarr;</span>
         <span className="flex items-center gap-2">
-          Proposed: {preview.proposed.score === null ? '\u2014' : Math.round(preview.proposed.score)}
-          <HealthStatusBadge status={preview.proposed.healthStatus as HealthStatus} />
+          Proposed: {proposed.score === null ? '\u2014' : Math.round(proposed.score)}
+          <HealthStatusBadge status={proposed.healthStatus} />
         </span>
       </div>
     </div>
@@ -169,6 +174,9 @@ export default function SettingsPage(): React.JSX.Element {
     queryFn: () => apiFetch('/me/settings', userSettingsResponseSchema),
   });
   const [form, setForm] = useState<FormState | null>(null);
+  const errors = useFormErrors();
+  const timezones = useMemo(() => allTimezones(), []);
+  const deviceTimezone = browserTimezone();
 
   useEffect(() => {
     if (settingsQuery.data) {
@@ -185,7 +193,7 @@ export default function SettingsPage(): React.JSX.Element {
       toast({ title: 'Settings saved' });
       toastSchedulesChanged(data.schedulesChanged);
     },
-    onError: (err) => toast({ title: 'Could not save settings', description: describeError(err), variant: 'destructive' }),
+    onError: (err) => errors.setFromApi(err, 'Could not save settings'),
   });
 
   const resetMutation = useMutation({
@@ -218,11 +226,13 @@ export default function SettingsPage(): React.JSX.Element {
     if (!weightsValid || !thresholdsValid) {
       return;
     }
+    // The same schema the server validates with, so e.g. an unknown timezone is caught here.
+    if (!errors.validate(updateUserSettingsRequestSchema, toRequest(form))) return;
     saveMutation.mutate(form);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-6">
       <div>
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="text-sm text-muted-foreground">Timezone, scheduling and scoring preferences.</p>
@@ -236,17 +246,30 @@ export default function SettingsPage(): React.JSX.Element {
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-timezone">Timezone (IANA)</Label>
+            {/* A native combobox: type to filter the full list of zones the browser knows. */}
             <Input
               id="settings-timezone"
               list="settings-timezone-options"
+              autoComplete="off"
               value={form.timezone}
               onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+              {...errors.fieldProps('timezone', 'settings-timezone')}
             />
             <datalist id="settings-timezone-options">
-              {COMMON_TIMEZONES.map((tz) => (
+              {timezones.map((tz) => (
                 <option key={tz} value={tz} />
               ))}
             </datalist>
+            <FieldError inputId="settings-timezone" message={errors.errors.timezone} />
+            {deviceTimezone && deviceTimezone !== form.timezone ? (
+              <button
+                type="button"
+                className="w-fit text-left text-xs text-primary hover:underline"
+                onClick={() => setForm({ ...form, timezone: deviceTimezone })}
+              >
+                Use this device&apos;s timezone ({deviceTimezone})
+              </button>
+            ) : null}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-day-start">Day starts at (hour, 0-23)</Label>
@@ -257,7 +280,9 @@ export default function SettingsPage(): React.JSX.Element {
               max={23}
               value={form.dayStartHour}
               onChange={(e) => setForm({ ...form, dayStartHour: Number(e.target.value) })}
+              {...errors.fieldProps('dayStartHour', 'settings-day-start')}
             />
+            <FieldError inputId="settings-day-start" message={errors.errors.dayStartHour} />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-algorithm">Default scheduling algorithm</Label>
@@ -285,7 +310,9 @@ export default function SettingsPage(): React.JSX.Element {
               min={1}
               value={form.neglectThresholdDays}
               onChange={(e) => setForm({ ...form, neglectThresholdDays: Number(e.target.value) })}
+              {...errors.fieldProps('neglectThresholdDays', 'settings-neglect')}
             />
+            <FieldError inputId="settings-neglect" message={errors.errors.neglectThresholdDays} />
           </div>
         </CardContent>
       </Card>
@@ -366,7 +393,9 @@ export default function SettingsPage(): React.JSX.Element {
                 max={100}
                 value={form.strongThreshold}
                 onChange={(e) => setForm({ ...form, strongThreshold: Number(e.target.value) })}
+                {...errors.fieldProps('strongThreshold', 'settings-strong')}
               />
+              <FieldError inputId="settings-strong" message={errors.errors.strongThreshold} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="settings-needs-review">Needs-review threshold (score below)</Label>
@@ -377,7 +406,9 @@ export default function SettingsPage(): React.JSX.Element {
                 max={100}
                 value={form.needsReviewThreshold}
                 onChange={(e) => setForm({ ...form, needsReviewThreshold: Number(e.target.value) })}
+                {...errors.fieldProps('needsReviewThreshold', 'settings-needs-review')}
               />
+              <FieldError inputId="settings-needs-review" message={errors.errors.needsReviewThreshold} />
             </div>
           </div>
           {!thresholdsValid ? (
@@ -386,12 +417,13 @@ export default function SettingsPage(): React.JSX.Element {
             </p>
           ) : null}
 
-          <WeightPreview form={form} />
+          <WeightPreview form={form} saved={settingsQuery.data.settings} />
         </CardContent>
       </Card>
 
-      <div>
-        <Button type="submit" disabled={saveMutation.isPending || !weightsValid || !thresholdsValid}>
+      <div className="flex flex-col gap-2">
+        <FormError message={errors.formError} />
+        <Button type="submit" className="w-fit" disabled={saveMutation.isPending || !weightsValid || !thresholdsValid}>
           Save settings
         </Button>
       </div>

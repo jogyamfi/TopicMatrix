@@ -47,19 +47,44 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
     await page.getByLabel('Name', { exact: true }).fill('Algebra');
     await page.getByRole('button', { name: 'Create topic' }).click();
     await expect(page.getByText('Algebra')).toBeVisible();
+
+    // A second topic that stays unstudied, for the queue's "Not started yet" section (R3).
+    await page.getByRole('button', { name: 'Add topic' }).first().click();
+    await page.getByLabel('Name', { exact: true }).fill('Geometry');
+    await page.getByRole('button', { name: 'Create topic' }).click();
+    await expect(page.getByText('Geometry')).toBeVisible();
   });
 
   await test.step('log a study session on the topic', async () => {
-    await page.getByRole('button', { name: 'Log session' }).click();
+    await page.getByRole('button', { name: 'Log session: Algebra' }).click();
     const dialog = page.getByRole('dialog');
+
+    // Field-level validation (R3): the message sits next to the field, which is marked invalid
+    // and focused, and nothing is sent.
+    await dialog.getByLabel('Questions attempted').fill('5');
+    await dialog.getByLabel('Questions correct').fill('8');
+    await dialog.getByRole('button', { name: 'Log session' }).click();
+    await expect(dialog.getByText('Questions correct cannot be more than questions attempted')).toBeVisible();
+    await expect(dialog.getByLabel('Questions correct')).toHaveAttribute('aria-invalid', 'true');
+    await expect(dialog.getByLabel('Questions correct')).toBeFocused();
+
     await dialog.getByLabel('Questions attempted').fill('10');
     await dialog.getByLabel('Questions correct').fill('8');
     await dialog.getByRole('button', { name: 'Log session' }).click();
     await expect(dialog).toBeHidden();
   });
 
-  await test.step('start and complete a review launcher session', async () => {
+  await test.step('the review queue lists never-studied topics separately', async () => {
     await page.getByRole('link', { name: 'Review' }).click();
+    const notStarted = page.locator('details').filter({ hasText: 'Not started yet' });
+    await expect(notStarted).toContainText('(1)');
+    // Collapsed while something is due (Algebra is now scheduled this week) — expand it.
+    await notStarted.getByText('Not started yet').click();
+    await expect(notStarted.getByRole('link', { name: 'Geometry' })).toBeVisible();
+    await expect(notStarted.getByRole('button', { name: 'Log first session' })).toBeVisible();
+  });
+
+  await test.step('start and complete a review launcher session', async () => {
     await page.getByRole('button', { name: 'Start review session' }).click();
     const launchDialog = page.getByRole('dialog');
     await launchDialog.getByRole('combobox', { name: 'Review' }).click();
@@ -67,12 +92,16 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
     await launchDialog.getByRole('button', { name: 'Start review' }).click();
     await expect(page).toHaveURL(/\/review\/launch$/);
 
-    await page.getByRole('button', { name: 'Log result' }).click();
+    // Keyboard shortcut (R3): L opens "Log result".
+    await expect(page.getByRole('button', { name: 'Log result' })).toBeVisible();
+    await page.keyboard.press('l');
     const logDialog = page.getByRole('dialog');
     await logDialog.getByLabel('Questions attempted').fill('9');
     await logDialog.getByLabel('Questions correct').fill('7');
     await logDialog.getByRole('button', { name: 'Log session' }).click();
     await expect(page.getByText('Session complete')).toBeVisible();
+    // The summary reports what happened, including accuracy across the sessions logged.
+    await expect(page.getByText(/1 logged\. Accuracy across the sessions you logged: 78%\./)).toBeVisible();
   });
 
   await test.step('view analytics', async () => {
@@ -120,4 +149,28 @@ test('dashboard and settings pages have no serious/critical accessibility violat
     (v) => v.impact === 'serious' || v.impact === 'critical',
   );
   expect(settingsSerious, JSON.stringify(settingsSerious, null, 2)).toHaveLength(0);
+
+  // The review queue, including R3's "Not started yet" section.
+  await page.getByRole('link', { name: 'Review' }).click();
+  await expect(page.getByText('Not started yet')).toBeVisible();
+  const reviewScan = await new AxeBuilder({ page }).analyze();
+  const reviewSerious = reviewScan.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
+  expect(reviewSerious, JSON.stringify(reviewSerious, null, 2)).toHaveLength(0);
+});
+
+test.describe('on a device in another timezone', () => {
+  test.use({ timezoneId: 'America/New_York' });
+
+  test('offers to switch the account to the device timezone (R3)', async ({ page }) => {
+    await page.goto('/login');
+    await page.getByLabel('Email').fill(SEEDED_EMAIL);
+    await page.getByLabel('Password').fill(NEW_PASSWORD);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+
+    const banner = page.getByRole('region', { name: 'Timezone' });
+    await expect(banner).toContainText('America/New_York');
+    await banner.getByRole('button', { name: 'Use America/New_York' }).click();
+    await expect(page.getByText('Now using America/New_York.')).toBeVisible();
+    await expect(banner).toBeHidden();
+  });
 });

@@ -64,11 +64,31 @@ const settingsPreviewSideSchema = z.object({
   healthStatus: z.string(),
 });
 
+// The sample topic's scoring inputs (dates as ISO strings) — lets the client re-score proposed
+// settings locally with packages/core's `scoreSample`, the function the server uses.
+export const scoringSampleSchema = z.object({
+  sessions: z.array(
+    z.object({
+      studiedOn: z.string(),
+      questionsAttempted: z.number(),
+      accuracy: z.number(),
+      confidence: z.number(),
+    }),
+  ),
+  asOfDate: z.string(),
+  currentIntervalDays: z.number().nullable(),
+  overdueDays: z.number(),
+  daysSinceLastSession: z.number().nullable(),
+  neglectThresholdDays: z.number(),
+});
+export type ScoringSampleView = z.infer<typeof scoringSampleSchema>;
+
 export const settingsPreviewResponseSchema = z.object({
   preview: z
     .object({
       topicId: z.string(),
       topicName: z.string(),
+      sample: scoringSampleSchema,
       current: settingsPreviewSideSchema,
       proposed: settingsPreviewSideSchema,
     })

@@ -7,7 +7,7 @@ import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
 import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { EmptyState } from '../../components/empty-state';

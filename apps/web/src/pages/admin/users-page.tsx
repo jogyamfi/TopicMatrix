@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { adminUpdateUserResponseSchema, adminUsersListResponseSchema, type AdminUserView } from '@topicmatrix/shared';
-import { apiFetch, ApiError } from '../../lib/api-client';
+import { apiFetch } from '../../lib/api-client';
+import { describeError } from '../../lib/api-error';
 import { queryKeys } from '../../lib/query-client';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
@@ -143,8 +144,3 @@ export default function AdminUsersPage(): React.JSX.Element {
   );
 }
 
-export function describeError(error: unknown): string {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error) return error.message;
-  return 'Unknown error';
-}

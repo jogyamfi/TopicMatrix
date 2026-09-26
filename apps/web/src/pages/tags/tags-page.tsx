@@ -14,7 +14,7 @@ import { apiFetch } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { invalidations } from '../../lib/invalidations';
 import { toast } from '../../lib/toast-store';
-import { describeError } from '../admin/users-page';
+import { describeError } from '../../lib/api-error';
 import { HealthStatusBadge, type HealthStatus } from '../../components/health-status-badge';
 import { EmptyState } from '../../components/empty-state';
 import { Button } from '../../components/ui/button';

@@ -18,6 +18,9 @@ interface ReviewQueueResponse {
   overdue: ReviewQueueItemView[];
   dueToday: ReviewQueueItemView[];
   dueNext7Days: ReviewQueueItemView[];
+  notStarted: ReviewQueueItemView[];
+  notStartedTotal: number;
+  nextReviewOn: string | null;
 }
 
 async function readJson<T>(res: Response): Promise<T> {
@@ -158,6 +161,44 @@ describe('review queue & launcher routes (FR-6.*, FR-7.1, delivery-plan.md P8)',
     const res = await ctx.app.request('/review/queue', { headers: authed(intruder.accessToken) });
     const body = await readJson<ReviewQueueResponse>(res);
     expect(body.overdue).toHaveLength(0);
+  });
+
+  it('lists never-studied topics separately, oldest first and capped, never as due (R3 U-5)', async () => {
+    const { accessToken, userId } = await createLoggedInUser(ctx);
+    const subject = await ctx.fixtures.createSubject(userId);
+    const archived = await ctx.fixtures.createSubject(userId);
+    await ctx.db.subjects.update(userId, archived.id, { isArchived: true });
+
+    const created: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      created.push((await ctx.fixtures.createTopic(userId, subject.id, { name: `New ${i}` })).id);
+    }
+    const suspended = await ctx.fixtures.createTopic(userId, subject.id, { name: 'Suspended' });
+    await ctx.db.topics.update(userId, suspended.id, { isSuspended: true });
+    await ctx.fixtures.createTopic(userId, archived.id, { name: 'In archived subject' });
+    await createDueTopic(ctx, userId, subject.id, { nextReviewOn: addDays(today(), -1) });
+
+    const queue = await readJson<ReviewQueueResponse>(
+      await ctx.app.request('/review/queue', { headers: authed(accessToken) }),
+    );
+    expect(queue.notStartedTotal).toBe(12);
+    expect(queue.notStarted.map((i) => i.topicId)).toEqual(created.slice(0, 10));
+    expect(queue.notStarted.every((i) => i.healthStatus === 'notStarted' && i.nextReviewOn === null)).toBe(true);
+    // Never studied is not the same as due.
+    expect(queue.overdue).toHaveLength(1);
+  });
+
+  it('reports the earliest upcoming review date, for an empty queue to point at (R3 U-5)', async () => {
+    const { accessToken, userId } = await createLoggedInUser(ctx);
+    const subject = await ctx.fixtures.createSubject(userId);
+    await createDueTopic(ctx, userId, subject.id, { nextReviewOn: addDays(today(), 12) });
+    await createDueTopic(ctx, userId, subject.id, { nextReviewOn: addDays(today(), 9) });
+
+    const queue = await readJson<ReviewQueueResponse>(
+      await ctx.app.request('/review/queue', { headers: authed(accessToken) }),
+    );
+    expect(queue.overdue.length + queue.dueToday.length + queue.dueNext7Days.length).toBe(0);
+    expect(queue.nextReviewOn).toBe(addDays(today(), 9).toISOString());
   });
 
   it('POST /review/start mode "subject" scopes to one subject', async () => {
