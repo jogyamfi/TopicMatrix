@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { argon2id } from 'hash-wasm';
 
 describe('Argon2id (hash-wasm) on workerd', () => {
-  it('cannot run — Workers disallows dynamic WebAssembly compilation (ADR-002)', async () => {
+  it('cannot run - Workers disallows dynamic WebAssembly compilation (ADR-002)', async () => {
     await expect(
       argon2id({
         password: 'benchmark-password-not-real',

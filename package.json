@@ -54,7 +54,9 @@
   },
   "overrides": {
     "esbuild": "0.28.2",
-    "devalue": "5.9.2"
+    "devalue": "5.9.2",
+    "@vitest/runner": "$vitest",
+    "@vitest/snapshot": "$vitest"
   },
   "description": "",
   "main": "eslint.config.js",

@@ -50,7 +50,7 @@ describe('D1 spike: @prisma/adapter-d1', () => {
     }).rejects.toThrow(/does not support interactive transactions/);
   });
 
-  it('recommended escape hatch: D1 native env.DB.batch() IS genuinely atomic — use it directly for multi-statement writes, never Prisma $transaction (P1 UnitOfWork)', async () => {
+  it('recommended escape hatch: D1 native env.DB.batch() IS genuinely atomic - use it directly for multi-statement writes, never Prisma $transaction (P1 UnitOfWork)', async () => {
     const id1 = `batch-${crypto.randomUUID()}`;
     const id2 = `batch-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
