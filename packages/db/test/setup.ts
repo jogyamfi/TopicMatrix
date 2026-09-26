@@ -30,6 +30,7 @@ export function testConfig(overrides: Partial<AppConfig>): AppConfig {
     argon2MemoryKib: 19456,
     argon2Iterations: 2,
     logLevel: 'error',
+    trustProxyHops: 0,
     ...overrides,
   };
 }

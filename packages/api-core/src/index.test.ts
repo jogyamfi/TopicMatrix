@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { createNodeDb } from '@topicmatrix/db/node';
+import { afterAll, describe, expect, it } from 'vitest';
+import { createProcessDbCache } from '@topicmatrix/db/node';
 import { createApp } from './index.js';
 import { buildDeps } from './deps.js';
 import { createPasswordService } from './auth/password.js';
+
+const dbCache = createProcessDbCache();
+afterAll(() => dbCache.disconnectAll());
+const createDb = dbCache.getDb.bind(dbCache);
 
 function testDeps() {
   return buildDeps(
@@ -12,7 +16,7 @@ function testDeps() {
       JWT_SECRET: 'a'.repeat(32),
       NODE_ENV: 'test',
     },
-    { createDb: createNodeDb, getClientIp: () => '127.0.0.1', createPasswordService },
+    { createDb, getClientIp: () => '127.0.0.1', createPasswordService },
   );
 }
 
@@ -62,7 +66,7 @@ describe('createApp health routes', () => {
           NODE_ENV: 'test',
           CORS_ORIGINS: 'https://allowed.example.com',
         },
-        { createDb: createNodeDb, getClientIp: () => '127.0.0.1', createPasswordService },
+        { createDb, getClientIp: () => '127.0.0.1', createPasswordService },
       ),
     );
 

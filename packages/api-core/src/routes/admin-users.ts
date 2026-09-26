@@ -40,9 +40,14 @@ function withoutUndefined<T extends object>(obj: T): { [K in keyof T]?: Exclude<
 }
 
 /**
- * Admin user management (FR-1.8). Deliberately the only surface under /admin — this route file
- * never touches subjects/topics/sessions and never will (SRS §16 Q7: admins cannot read learner
- * study data); see index.test.ts's assertion that no such route is registered.
+ * Admin user management (FR-1.8). An admin can never deactivate or delete their OWN account:
+ * the acting admin is by definition active, so this alone guarantees at least one active admin
+ * always remains to manage accounts. (Roles can't be changed through this API; if that's ever
+ * added, it also needs a "not the last active admin" check.)
+ *
+ * Deliberately the only surface under /admin — this route file never touches subjects/topics/
+ * sessions and never will (SRS §16 Q7: admins cannot read learner study data); see
+ * index.test.ts's assertion that no such route is registered.
  */
 export function registerAdminRoutes(app: Hono<AppEnv>): void {
   app.use('/admin/*', requireAuth, requirePasswordChanged, requireAdmin);
@@ -96,6 +101,9 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
     if (!target) {
       throw new AppError('NOT_FOUND', 'User not found');
     }
+    if (body.isActive === false && targetId === actor.id) {
+      throw new AppError('FORBIDDEN', 'You cannot deactivate your own account');
+    }
 
     const updated = await deps.db.users.update(targetId, withoutUndefined(body));
     if (body.isActive === false) {
@@ -120,6 +128,9 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
     const target = await deps.db.users.findById(targetId);
     if (!target) {
       throw new AppError('NOT_FOUND', 'User not found');
+    }
+    if (targetId === actor.id) {
+      throw new AppError('FORBIDDEN', 'You cannot delete your own account');
     }
 
     await deleteUserAccount(deps.db, targetId);

@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import type { z, ZodType } from 'zod';
+import type { z, ZodError, ZodType } from 'zod';
 import { AppError } from '@topicmatrix/shared';
 
 /**
@@ -18,8 +18,23 @@ export async function parseJsonBody<S extends ZodType>(c: Context, schema: S): P
 
   const result = schema.safeParse(json);
   if (!result.success) {
-    throw new AppError('VALIDATION_FAILED', 'Validation failed', result.error.flatten());
+    throw new AppError('VALIDATION_FAILED', describeFirstIssue(result.error), result.error.flatten());
   }
   return result.data;
+}
+
+/**
+ * A human-readable top-level message naming the first problem, so a client that only shows
+ * `error.message` still tells the user what to fix; the full per-field breakdown stays in
+ * `details`. Custom (refine) messages are already written for people and are used verbatim;
+ * Zod's built-in ones ("Expected number, received string") need the field name for context.
+ */
+function describeFirstIssue(error: ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) {
+    return 'Validation failed';
+  }
+  const field = issue.path.join('.');
+  return issue.code === 'custom' || field.length === 0 ? issue.message : `${field}: ${issue.message}`;
 }
 

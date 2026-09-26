@@ -27,8 +27,10 @@ import {
 } from '../../components/ui/card';
 import { CreateUserDialog } from './create-user-dialog';
 import { DeleteUserDialog } from './delete-user-dialog';
+import { useAuth } from '../../context/auth-context';
 
 export default function AdminUsersPage(): React.JSX.Element {
+  const { user: currentUser } = useAuth();
   const usersQuery = useQuery({
     queryKey: queryKeys.admin.users(),
     queryFn: () => apiFetch('/admin/users', adminUsersListResponseSchema),
@@ -93,7 +95,12 @@ export default function AdminUsersPage(): React.JSX.Element {
               <TableBody>
                 {usersQuery.data.users.map((user) => (
                   <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.displayName}</TableCell>
+                    <TableCell className="font-medium">
+                      {user.displayName}
+                      {user.id === currentUser?.id ? (
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">(you)</span>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{user.email}</TableCell>
                     <TableCell>
                       <Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>{user.role}</Badge>
@@ -104,19 +111,23 @@ export default function AdminUsersPage(): React.JSX.Element {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={toggleActiveMutation.isPending}
-                          onClick={() => toggleActiveMutation.mutate(user)}
-                        >
-                          {user.isActive ? 'Disable' : 'Enable'}
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => setDeleteTarget(user)}>
-                          Delete
-                        </Button>
-                      </div>
+                      {/* The server refuses both for your own account, so an admin can't lock
+                          everyone out (the acting admin is always an active one). */}
+                      {user.id === currentUser?.id ? null : (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={toggleActiveMutation.isPending}
+                            onClick={() => toggleActiveMutation.mutate(user)}
+                          >
+                            {user.isActive ? 'Disable' : 'Enable'}
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => setDeleteTarget(user)}>
+                            Delete
+                          </Button>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

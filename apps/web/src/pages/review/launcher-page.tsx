@@ -13,6 +13,8 @@ import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { LogSessionDialog } from '../topics/log-session-dialog';
+import { useAuth } from '../../context/auth-context';
+import { formatDateOnly } from '../../lib/dates';
 
 /** Narrows a nullable/undefined value with a real runtime check, never a bare `!` assertion. */
 function mustExist<T>(value: T | undefined, message: string): T {
@@ -29,14 +31,16 @@ function mustExist<T>(value: T | undefined, message: string): T {
  */
 export default function LauncherPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [run, setRun] = useState<LauncherRun | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
 
   useEffect(() => {
-    setRun(loadLauncherRun());
+    setRun(userId ? loadLauncherRun(userId) : null);
     setLoaded(true);
-  }, []);
+  }, [userId]);
 
   const scheduleMutation = useMutation({
     mutationFn: (vars: { topicId: string; days: number }) =>
@@ -120,7 +124,7 @@ export default function LauncherPage(): React.JSX.Element {
               <span className="text-muted-foreground">Trend: {item.accuracyTrend}</span>
             ) : null}
             <span className="text-muted-foreground">
-              Next due: {item.nextReviewOn ? new Date(item.nextReviewOn).toLocaleDateString() : '—'}
+              Next due: {item.nextReviewOn ? formatDateOnly(item.nextReviewOn) : '—'}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2 pt-2">

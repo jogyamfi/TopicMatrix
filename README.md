@@ -68,6 +68,7 @@ documents/planning/        SRS, delivery plan, ADRs, phase handover notes
 | `npm run dev:pg` | Same, against PostgreSQL |
 | `npm run dev:cf` | Run the Worker entrypoint locally via `wrangler dev` (optional; needs Cloudflare tooling) |
 | `npm run db:migrate` / `db:reset` / `db:studio` | Respect `DATABASE_PROVIDER` from `.env` |
+| `npm run db:generate` | Regenerate the per-provider Prisma schemas and all three clients (no DB needed; `npm test` runs it automatically if the clients are missing) |
 | `npm run seed:admin` | One-time initial admin user (Node only; refuses to run if any user exists) |
 | `npm run seed:demo` | Realistic demo dataset — subjects, a topic tree, back-dated sessions (FR-D.10) |
 | `npm run build` | Builds all workspaces, including both API entrypoints |

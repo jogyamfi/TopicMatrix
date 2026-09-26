@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { computeCompetencyScore, getScheduler, replaySchedule, roundScoreForStorage, type Grade } from '@topicmatrix/core';
+import { addDays, startOfUserDay } from '@topicmatrix/shared';
 import { setupApiTest, type ApiTestContext } from '../../test/setup.js';
 import { createPasswordService } from '../auth/password.js';
 import { createTokenService } from '../auth/tokens.js';
@@ -251,6 +252,29 @@ describe('study session, scoring and scheduling routes (FR-4.*, FR-5.*, delivery
       expect(afterSuspend.isSuspended).toBe(true);
       // Suspending must not disturb the previously-set date (FR-5.10 is independent of FR-5.6).
       expect(afterSuspend.nextReviewOn).toBe(afterSnooze.nextReviewOn);
+    });
+
+    it('snoozes an overdue topic from today, not from its past due date', async () => {
+      const { accessToken, userId } = await createLoggedInUser(ctx);
+      const subject = await ctx.fixtures.createSubject(userId);
+      const topic = await ctx.fixtures.createTopic(userId, subject.id);
+
+      await ctx.app.request(`/topics/${topic.id}/schedule/override`, {
+        method: 'POST',
+        headers: authed(accessToken),
+        body: JSON.stringify({ action: 'setNextReviewOn', nextReviewOn: iso(10) }), // 10 days overdue
+      });
+      const snooze = await ctx.app.request(`/topics/${topic.id}/schedule/override`, {
+        method: 'POST',
+        headers: authed(accessToken),
+        body: JSON.stringify({ action: 'snooze', days: 1 }),
+      });
+      expect(snooze.status).toBe(200);
+      const afterSnooze = (await readJson<{ schedule: ScheduleView }>(snooze)).schedule;
+
+      // Default settings: Europe/London, day starting at 04:00.
+      const userToday = startOfUserDay(new Date(), 'Europe/London', 4);
+      expect(afterSnooze.nextReviewOn).toBe(addDays(userToday, 1).toISOString());
     });
 
     it('can suspend a topic that has never been studied (no ReviewSchedule row exists yet)', async () => {

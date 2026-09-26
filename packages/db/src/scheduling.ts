@@ -1,4 +1,4 @@
-import { AppError, addDays, parseManualIntervals, type Algorithm } from '@topicmatrix/shared';
+import { AppError, addDays, parseManualIntervals, startOfUserDay, type Algorithm } from '@topicmatrix/shared';
 import {
   computeCompetencyScore,
   getScheduler,
@@ -191,6 +191,20 @@ export async function applyScheduleOverride(
       );
     }
 
+    // Snoozing pushes a review `days` past whichever is LATER: its current due date, or the
+    // user's today. Counting from a due date in the past would leave an overdue topic overdue
+    // (1-day snooze of a topic 10 days overdue = still 9 days overdue).
+    async function snoozeBase(currentNextReviewOn: Date | null): Promise<Date> {
+      const settings = await tx.userSettings.findUnique({ where: { userId } });
+      if (!settings) {
+        throw new AppError('NOT_FOUND', 'User settings not found');
+      }
+      const today = startOfUserDay(asOfDate, settings.timezone, settings.dayStartHour);
+      return currentNextReviewOn && currentNextReviewOn.getTime() > today.getTime()
+        ? currentNextReviewOn
+        : today;
+    }
+
     if (override.kind === 'suspend') {
       if (existing) {
         return tx.reviewSchedule.update({ where: { topicId }, data: { isSuspended: override.suspended } });
@@ -203,7 +217,7 @@ export async function applyScheduleOverride(
     const nextReviewOn =
       override.kind === 'setNextReviewOn'
         ? override.nextReviewOn
-        : addDays(existing?.nextReviewOn ?? asOfDate, override.days);
+        : addDays(await snoozeBase(existing?.nextReviewOn ?? null), override.days);
 
     if (existing) {
       return tx.reviewSchedule.update({ where: { topicId }, data: { nextReviewOn } });

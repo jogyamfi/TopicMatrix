@@ -197,6 +197,57 @@ describe('admin user-management routes', () => {
     expect(await ctx.db.users.findById(learner.id)).not.toBeNull();
   });
 
+  it('refuses to let an admin deactivate their own account', async () => {
+    const { accessToken, userId } = await createLoggedInUser(ctx, 'ADMIN');
+
+    const res = await ctx.app.request(`/admin/users/${userId}`, {
+      method: 'PATCH',
+      headers: { ...authed(accessToken), 'content-type': 'application/json' },
+      body: JSON.stringify({ isActive: false }),
+    });
+    expect(res.status).toBe(403);
+    expect((await ctx.db.users.findById(userId))?.isActive).toBe(true);
+
+    // Editing their own display name is still fine.
+    const rename = await ctx.app.request(`/admin/users/${userId}`, {
+      method: 'PATCH',
+      headers: { ...authed(accessToken), 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Renamed Admin' }),
+    });
+    expect(rename.status).toBe(200);
+  });
+
+  it('refuses to let an admin delete their own account', async () => {
+    const { accessToken, userId } = await createLoggedInUser(ctx, 'ADMIN');
+
+    const res = await ctx.app.request(`/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: { ...authed(accessToken), 'content-type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    expect(res.status).toBe(403);
+    expect(await ctx.db.users.findById(userId)).not.toBeNull();
+  });
+
+  it('still lets an admin deactivate and delete another admin', async () => {
+    const { accessToken } = await createLoggedInUser(ctx, 'ADMIN');
+    const { userId: otherAdminId } = await createLoggedInUser(ctx, 'ADMIN');
+
+    const deactivate = await ctx.app.request(`/admin/users/${otherAdminId}`, {
+      method: 'PATCH',
+      headers: { ...authed(accessToken), 'content-type': 'application/json' },
+      body: JSON.stringify({ isActive: false }),
+    });
+    expect(deactivate.status).toBe(200);
+
+    const remove = await ctx.app.request(`/admin/users/${otherAdminId}`, {
+      method: 'DELETE',
+      headers: { ...authed(accessToken), 'content-type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    expect(remove.status).toBe(200);
+  });
+
   it('never exposes subjects/topics/sessions under /admin (SRS §16 Q7)', async () => {
     const { accessToken: adminToken } = await createLoggedInUser(ctx, 'ADMIN');
     const res = await ctx.app.request('/admin/subjects', { headers: authed(adminToken) });

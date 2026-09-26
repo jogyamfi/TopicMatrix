@@ -1,4 +1,7 @@
 import { authResponseSchema, type PublicUser } from '@topicmatrix/shared';
+import { toApiError } from './api-error';
+import { queryClient } from './query-client';
+import { clearLauncherRun } from './launcher-store';
 
 // The access token lives ONLY here, in memory (SEC-2) — never localStorage/sessionStorage.
 // A page reload always loses it; AuthProvider calls `authStore.bootstrap()` on mount to try to
@@ -33,7 +36,12 @@ class AuthStore {
   }
 
   private setState(patch: Partial<AuthState>): void {
+    const previousUserId = this.state.user?.id ?? null;
     this.state = { ...this.state, ...patch };
+    const nextUserId = this.state.user?.id ?? null;
+    if (previousUserId !== null && previousUserId !== nextUserId) {
+      clearUserScopedState();
+    }
     for (const listener of this.listeners) listener(this.state);
   }
 
@@ -53,8 +61,7 @@ class AuthStore {
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-      throw new Error(body?.error?.message ?? 'Login failed');
+      throw await toApiError(res);
     }
     const data = authResponseSchema.parse(await res.json());
     this.setState({ accessToken: data.accessToken, user: data.user, status: 'authenticated' });
@@ -114,6 +121,17 @@ class AuthStore {
       return null;
     }
   }
+}
+
+/**
+ * Everything cached on the client for the signed-in user — React Query's cache and the resumable
+ * launcher run. Cleared whenever the user changes (logout, an expired session, or a different
+ * account signing in on the same browser) so the next person never sees the previous user's
+ * subjects, topics or review queue, not even briefly while a refetch is in flight.
+ */
+function clearUserScopedState(): void {
+  queryClient.clear();
+  clearLauncherRun();
 }
 
 export const authStore = new AuthStore();
