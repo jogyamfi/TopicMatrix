@@ -61,7 +61,12 @@ export type SubjectListItem = z.infer<typeof subjectListItemSchema>;
 export const subjectsListResponseSchema = z.object({ subjects: z.array(subjectListItemSchema) });
 export type SubjectsListResponse = z.infer<typeof subjectsListResponseSchema>;
 
-export const subjectResponseSchema = z.object({ subject: subjectViewSchema });
+// `schedulesChanged` (PATCH only): next-review dates that moved because the subject's default
+// algorithm changed (FR-5.7).
+export const subjectResponseSchema = z.object({
+  subject: subjectViewSchema,
+  schedulesChanged: z.number().int().optional(),
+});
 export type SubjectResponse = z.infer<typeof subjectResponseSchema>;
 
 export const subjectTreeResponseSchema = z.object({

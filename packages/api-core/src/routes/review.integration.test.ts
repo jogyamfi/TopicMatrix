@@ -57,7 +57,8 @@ async function createDueTopic(
   opts: { nextReviewOn: Date; accuracy?: number; confidence?: number; isSuspended?: boolean; topicSuspended?: boolean },
 ) {
   const topic = await ctx.fixtures.createTopic(userId, subjectId);
-  if (opts.topicSuspended) {
+  // Since R2 there is one suspend flag (Topic.isSuspended); both options now set it.
+  if (opts.topicSuspended || opts.isSuspended) {
     await ctx.db.topics.update(userId, topic.id, { isSuspended: true });
   }
   const attempted = 10;
@@ -73,7 +74,6 @@ async function createDueTopic(
     nextReviewOn: opts.nextReviewOn,
     lastReviewedOn: new Date(),
     intervalDays: 1,
-    isSuspended: opts.isSuspended ?? false,
   });
   return topic;
 }

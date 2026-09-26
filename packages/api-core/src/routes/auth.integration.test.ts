@@ -87,7 +87,7 @@ describe('auth routes', () => {
     expect(res.status).toBe(401);
   });
 
-  it('full cycle: login -> refresh rotates the cookie and rejects reuse of the old one -> logout revokes it', async () => {
+  it('full cycle: login -> refresh rotates the cookie -> logout revokes it', async () => {
     const user = await createActiveUser(ctx, 'correct-horse-battery');
     const login = await ctx.app.request(loginRequest(user.email, 'correct-horse-battery'));
     const firstToken = cookieValue(login, 'refreshToken');
@@ -101,12 +101,6 @@ describe('auth routes', () => {
     const secondToken = cookieValue(refreshed, 'refreshToken');
     expect(secondToken).not.toBe(firstToken);
 
-    const reuseOldToken = await ctx.app.request('/auth/refresh', {
-      method: 'POST',
-      headers: { cookie: `refreshToken=${firstToken}` },
-    });
-    expect(reuseOldToken.status).toBe(401);
-
     const logout = await ctx.app.request('/auth/logout', {
       method: 'POST',
       headers: { authorization: `Bearer ${accessToken}`, cookie: `refreshToken=${secondToken}` },
@@ -118,6 +112,111 @@ describe('auth routes', () => {
       headers: { cookie: `refreshToken=${secondToken}` },
     });
     expect(afterLogout.status).toBe(401);
+  });
+
+  describe('reuse of a rotated refresh token (D-6)', () => {
+    let now: number;
+    let clockCtx: ApiTestContext;
+
+    beforeEach(async () => {
+      now = Date.now();
+      clockCtx = await setupApiTest({ clock: () => new Date(now) });
+    });
+
+    afterEach(() => clockCtx.teardown());
+
+    async function loginAndRotate(): Promise<{ firstToken: string; secondToken: string }> {
+      const user = await createActiveUser(clockCtx, 'correct-horse-battery');
+      const login = await clockCtx.app.request(loginRequest(user.email, 'correct-horse-battery'));
+      const firstToken = cookieValue(login, 'refreshToken');
+      const refreshed = await clockCtx.app.request('/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `refreshToken=${firstToken}` },
+      });
+      expect(refreshed.status).toBe(200);
+      return { firstToken, secondToken: cookieValue(refreshed, 'refreshToken') };
+    }
+
+    it('honours a just-rotated token (another tab refreshing concurrently) without touching the cookie', async () => {
+      const { firstToken, secondToken } = await loginAndRotate();
+
+      const concurrent = await clockCtx.app.request('/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `refreshToken=${firstToken}` },
+      });
+      expect(concurrent.status).toBe(200);
+      expect((await readJson<LoginResponseBody>(concurrent)).accessToken).toBeTruthy();
+      // Neither a new cookie nor a cookie deletion: the browser keeps the successor.
+      expect(concurrent.headers.get('set-cookie')).toBeNull();
+
+      // The successor is still valid.
+      const next = await clockCtx.app.request('/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `refreshToken=${secondToken}` },
+      });
+      expect(next.status).toBe(200);
+    });
+
+    it('treats a rotated token replayed after the grace window as theft: every session is revoked', async () => {
+      const { firstToken, secondToken } = await loginAndRotate();
+      now += 31_000;
+
+      const replay = await clockCtx.app.request('/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `refreshToken=${firstToken}` },
+      });
+      expect(replay.status).toBe(401);
+
+      // The legitimate successor was revoked too — the attacker and the victim both re-login.
+      const successor = await clockCtx.app.request('/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `refreshToken=${secondToken}` },
+      });
+      expect(successor.status).toBe(401);
+    });
+
+    it('rejects a logged-out token without revoking the other sessions of that user', async () => {
+      const user = await createActiveUser(clockCtx, 'correct-horse-battery');
+      const tabA = await clockCtx.app.request(loginRequest(user.email, 'correct-horse-battery'));
+      const tabB = await clockCtx.app.request(loginRequest(user.email, 'correct-horse-battery'));
+      const tokenA = cookieValue(tabA, 'refreshToken');
+      const { accessToken: accessA } = await readJson<LoginResponseBody>(tabA);
+
+      await clockCtx.app.request('/auth/logout', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessA}`, cookie: `refreshToken=${tokenA}` },
+      });
+      const replay = await clockCtx.app.request('/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `refreshToken=${tokenA}` },
+      });
+      expect(replay.status).toBe(401);
+
+      const other = await clockCtx.app.request('/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `refreshToken=${cookieValue(tabB, 'refreshToken')}` },
+      });
+      expect(other.status).toBe(200);
+    });
+
+    it('purges expired and long-revoked tokens on login', async () => {
+      const user = await createActiveUser(clockCtx, 'correct-horse-battery');
+      const expired = await clockCtx.db.refreshTokens.create(user.id, {
+        tokenHash: 'expired-token-hash',
+        expiresAt: new Date(now - 1000),
+      });
+      const longRevoked = await clockCtx.db.refreshTokens.create(user.id, {
+        tokenHash: 'long-revoked-token-hash',
+        expiresAt: new Date(now + 86_400_000),
+      });
+      await clockCtx.db.refreshTokens.revoke(user.id, longRevoked.id);
+      now += 8 * 24 * 60 * 60 * 1000; // past the 7-day revoked-token retention
+
+      await clockCtx.app.request(loginRequest(user.email, 'correct-horse-battery'));
+
+      expect(await clockCtx.db.refreshTokens.findByTokenHash(expired.tokenHash)).toBeNull();
+      expect(await clockCtx.db.refreshTokens.findByTokenHash(longRevoked.tokenHash)).toBeNull();
+    });
   });
 
   it('change-password updates the hash, clears mustChangePassword, and revokes existing refresh tokens', async () => {

@@ -14,6 +14,8 @@ export const invalidations = {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.settings.detail() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.subjects.list() }),
+      // A new default algorithm/ladder can move next-review dates shown on topic pages.
+      queryClient.invalidateQueries({ queryKey: ['topics'] }),
       queryClient.invalidateQueries({ queryKey: ['analytics'] }),
       queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() }),
     ]),
@@ -24,6 +26,8 @@ export const invalidations = {
   afterSubjectWrite: () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.subjects.list() }),
+      // A new default algorithm can move next-review dates shown on topic pages.
+      queryClient.invalidateQueries({ queryKey: ['topics'] }),
       queryClient.invalidateQueries({ queryKey: queryKeys.review.queue() }),
       queryClient.invalidateQueries({ queryKey: ['analytics'] }),
     ]),

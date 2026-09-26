@@ -61,6 +61,10 @@ results users will notice · **Medium** = UX defect or latent bug · **Low** = p
 
 ## Phase R1 — Critical fixes (small, isolated, ship first)
 
+**Status: done** (PR #1). Also fixed `npm run test:cf`, which the 0.12 `vitest-pool-workers` bump had
+broken: its `@vitest/runner`/`@vitest/snapshot` peers resolved to 3.x against vitest 2.1.9, so
+the root `overrides` now pin both to `$vitest`.
+
 **Goal:** remove the production-outage, privacy and "wrong date" defects. Each item below is only a
 few lines; all of them fit in one PR.
 
@@ -117,6 +121,29 @@ you log a session at 01:00 local time.
 ---
 
 ## Phase R2 — Data integrity & scheduling consistency
+
+**Status: implemented.** Migration `20260926120000_r2_data_integrity` (SQLite/PostgreSQL) and
+`apps/worker/migrations/0003_r2_data_integrity.sql` (D1). The SQLite migration was tested against
+seeded pre-R2 data, and the D1 one runs under `test:cf`. The PostgreSQL one was generated offline
+and is **not runtime-verified** (still no Docker on the dev machine).
+
+Decisions taken while implementing it:
+- **D-1:** `ReviewSchedule.isSuspended` is dropped. The API still reports `schedule.isSuspended`,
+  now derived from the topic. Suspending a never-studied topic no longer creates an empty schedule
+  row. The JSON export is now `version: 2` (schedules no longer carry the flag).
+- **D-3:** snapshots are fully derived: one per study day, scored as of that day. Changing the
+  scoring *weights* does not rebuild existing snapshots. Live scores always use the current
+  weights, and the history keeps the weights in force when each topic was last recalculated.
+- **D-2:** a recalculation keeps a next-review date that was set directly on a never-studied topic
+  (a schedule with no `lastReviewedOn`), changing only its algorithm.
+- **D-5:** `POST /topics/:id/move` takes `position` (0-based) instead of `sortOrder`.
+- **D-6:** the grace window is 30 s, and revoked tokens are kept for 7 days so reuse can be
+  detected. The client uses a `BroadcastChannel` for sign-in and sign-out only, not to share
+  access tokens: the server-side grace window already handles concurrent refreshes.
+- Found while doing this: `POST /topics/:id/schedule/override` never returned the `status` field
+  that the shared response schema requires. Every Pause/Snooze in the web UI therefore showed an
+  error toast even though it had worked. It now returns `status`, and a test parses the response
+  with the shared schema.
 
 **Goal:** make stored state self-consistent and remove the silent divergences. This phase includes
 one schema migration, which must be generated for sqlite, postgres **and** D1

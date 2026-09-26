@@ -52,7 +52,7 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
     setDurationMinutes(session.durationMinutes !== null ? String(session.durationMinutes) : '');
     setNotes(session.notes ?? '');
     setError(null);
-  }, [session]);
+  }, [session?.id]);
 
   const saveMutation = useMutation({
     mutationFn: () => {

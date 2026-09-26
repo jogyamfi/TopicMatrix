@@ -7,6 +7,7 @@ import {
 } from '@topicmatrix/shared';
 import {
   deleteSubjectCascade,
+  updateSubjectAndReschedule,
   computeSubjectTopicMetrics,
   computeSubjectSummary,
   type Subject,
@@ -88,8 +89,15 @@ export function registerSubjectRoutes(app: Hono<AppEnv>): void {
     const deps = c.get('deps');
     const user = getAuthUser(c);
     const body = await parseJsonBody(c, updateSubjectRequestSchema);
-    const subject = await deps.db.subjects.update(user.id, c.req.param('id'), withoutUndefined(body));
-    return c.json({ subject: toSubjectView(subject) });
+    // A new default algorithm re-derives the schedules of topics without their own override
+    // (FR-5.7); `schedulesChanged` counts the next-review dates that moved, for the UI to report.
+    const { subject, schedulesChanged } = await updateSubjectAndReschedule(
+      deps.db,
+      user.id,
+      c.req.param('id'),
+      withoutUndefined(body),
+    );
+    return c.json({ subject: toSubjectView(subject), schedulesChanged });
   });
 
   // Cascades topics, sessions, schedules and snapshots inside one UnitOfWork (FR-2.4).

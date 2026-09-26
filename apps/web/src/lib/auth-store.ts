@@ -16,6 +16,21 @@ export interface AuthState {
 
 type Listener = (state: AuthState) => void;
 
+/** Cross-tab auth events (same browser, same origin). */
+type AuthBroadcast = { type: 'signed-out' } | { type: 'signed-in'; userId: string };
+
+function openAuthChannel(): BroadcastChannel | null {
+  try {
+    if (typeof BroadcastChannel === 'undefined') return null;
+    const channel = new BroadcastChannel('topicmatrix-auth');
+    // Node (tests) keeps the event loop alive for an open channel; browsers have no unref.
+    (channel as { unref?: () => void }).unref?.();
+    return channel;
+  } catch {
+    return null;
+  }
+}
+
 class AuthStore {
   private state: AuthState = { accessToken: null, user: null, status: 'idle' };
   private listeners = new Set<Listener>();
@@ -25,6 +40,39 @@ class AuthStore {
   // clobbering its state with stale data (a real race: mount-time refresh vs. a fast manual
   // login on the same page).
   private epoch = 0;
+  // Tabs share the refresh cookie but each holds its own in-memory access token, so a logout
+  // (or another account signing in) in one tab is broadcast to the others — otherwise they'd keep
+  // working as the old user until their access token expired.
+  private channel = openAuthChannel();
+
+  constructor() {
+    if (this.channel) {
+      this.channel.onmessage = (event: MessageEvent<AuthBroadcast>) => this.onBroadcast(event.data);
+    }
+  }
+
+  private broadcast(message: AuthBroadcast): void {
+    try {
+      this.channel?.postMessage(message);
+    } catch {
+      // Best-effort: other tabs will still find out at their next refresh.
+    }
+  }
+
+  private onBroadcast(message: AuthBroadcast): void {
+    if (message.type === 'signed-out') {
+      if (this.state.user) {
+        this.epoch += 1;
+        this.setState({ accessToken: null, user: null, status: 'unauthenticated' });
+      }
+      return;
+    }
+    // Someone signed in elsewhere: the shared cookie now belongs to them. Adopt it (or drop our
+    // stale session) unless we already are that user.
+    if (this.state.user?.id !== message.userId) {
+      void this.refresh();
+    }
+  }
 
   getState(): AuthState {
     return this.state;
@@ -65,6 +113,7 @@ class AuthStore {
     }
     const data = authResponseSchema.parse(await res.json());
     this.setState({ accessToken: data.accessToken, user: data.user, status: 'authenticated' });
+    this.broadcast({ type: 'signed-in', userId: data.user.id });
     return data.user;
   }
 
@@ -72,6 +121,7 @@ class AuthStore {
     this.epoch += 1;
     const token = this.state.accessToken;
     this.setState({ accessToken: null, user: null, status: 'unauthenticated' });
+    this.broadcast({ type: 'signed-out' });
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
@@ -87,6 +137,7 @@ class AuthStore {
   reset(): void {
     this.epoch += 1;
     this.setState({ accessToken: null, user: null, status: 'unauthenticated' });
+    this.broadcast({ type: 'signed-out' });
   }
 
   updateUser(user: PublicUser): void {

@@ -9,6 +9,7 @@ import {
 } from '@topicmatrix/shared';
 import { apiFetch, ApiError } from '../../lib/api-client';
 import { invalidations } from '../../lib/invalidations';
+import { toastSchedulesChanged } from '../../lib/toast-store';
 import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -57,7 +58,7 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
     setIcon(subject?.icon ?? null);
     setDefaultAlgorithm(subject?.defaultAlgorithm ?? 'inherit');
     setError(null);
-  }, [open, subject]);
+  }, [open, subject?.id]);
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -72,8 +73,9 @@ export function SubjectDialog({ subject, open, onOpenChange }: Props): React.JSX
         ? apiFetch(`/subjects/${subject.id}`, subjectResponseSchema, { method: 'PATCH', body })
         : apiFetch('/subjects', subjectResponseSchema, { method: 'POST', body });
     },
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       await invalidations.afterSubjectWrite();
+      toastSchedulesChanged(data.schedulesChanged);
       onOpenChange(false);
     },
     onError: (err) => {
