@@ -57,9 +57,11 @@ export type AppEnv = { Variables: AppVariables };
  * `createDb` is a caller-supplied factory rather than something this module constructs itself:
  * this file is shared by both entrypoints, and Prisma's regular sqlite/postgresql client needs
  * Node built-ins just to load — importing it here (even just to re-export) drags that into
- * apps/worker's bundle and breaks under `workerd`. `apps/api` passes `createNodeDb` (from
- * `@topicmatrix/db/node`); `apps/worker` passes `createDb` (from the main `@topicmatrix/db`
- * barrel, d1-only for now — see packages/db/src/db.ts).
+ * apps/worker's bundle and breaks under `workerd`. `apps/api` passes a process-scoped cache
+ * (`createProcessDbCache` from `@topicmatrix/db/node`) so every request shares ONE connection
+ * pool — `createDb` is called per request, so it must not open a new pool each time;
+ * `apps/worker` passes `createDb` (from the main `@topicmatrix/db` barrel, d1-only for now — see
+ * packages/db/src/db.ts).
  *
  * `rateLimiter` is optional and defaults to allow-all: it's the one exception to "rebuilt fresh
  * per request" — a rate limiter needs state that persists ACROSS requests to mean anything, so

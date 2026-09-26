@@ -62,6 +62,23 @@ export default tseslint.config(
     },
   },
   {
+    // Date-only values are UTC-midnight instants; formatting one in the browser's local zone
+    // shows the previous day west of UTC. lib/dates.ts's formatDateOnly is the one sanctioned
+    // way to display them.
+    files: ['apps/web/**/*.{ts,tsx}'],
+    ignores: ['apps/web/src/lib/dates.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.property.name='toLocaleDateString'][arguments.length<2]",
+          message:
+            'Use formatDateOnly() from lib/dates for date-only values (or pass an explicit timeZone option).',
+        },
+      ],
+    },
+  },
+  {
     // Root-level tooling scripts run under Node directly; they are exempt from NF-13
     // (which governs application code) and need Node globals recognised.
     files: ['scripts/**/*.mjs', '*.config.{js,ts,mjs}'],

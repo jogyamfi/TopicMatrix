@@ -39,6 +39,7 @@ import { EditSessionDialog } from './edit-session-dialog';
 import { DeleteSessionDialog } from './delete-session-dialog';
 import { SessionHistoryTable } from './session-history-table';
 import { LaunchReviewDialog } from '../review/launch-review-dialog';
+import { formatDateOnly } from '../../lib/dates';
 
 function ScoreCard({ title, score, health }: { title: string; score: number | null; health: string | null }): React.JSX.Element {
   return (
@@ -267,7 +268,7 @@ export default function TopicDetailPage(): React.JSX.Element {
           <CardContent>
             {schedule?.nextReviewOn ? (
               <>
-                <p className="text-lg font-semibold">{new Date(schedule.nextReviewOn).toLocaleDateString()}</p>
+                <p className="text-lg font-semibold">{formatDateOnly(schedule.nextReviewOn)}</p>
                 <p className="text-xs text-muted-foreground">Algorithm: {schedule.algorithm}</p>
               </>
             ) : (

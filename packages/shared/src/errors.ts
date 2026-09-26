@@ -47,19 +47,26 @@ export interface ErrorEnvelope {
   };
 }
 
-/** Stack traces and internal messages are suppressed unless exposeDetails is true (prod safety). */
+/**
+ * Internal messages and details of server-side (5xx) failures are suppressed unless
+ * exposeDetails is true (prod safety). Client errors (4xx) always carry their message and
+ * details: those describe the caller's own request (which field failed validation, that a
+ * password change is required) and the client needs them to show the user what to fix.
+ */
 export function toErrorEnvelope(
   err: unknown,
   opts: { exposeDetails: boolean },
 ): { status: number; body: ErrorEnvelope } {
   if (err instanceof AppError) {
+    const isClientError = err.status < 500;
+    const expose = isClientError || opts.exposeDetails;
     return {
       status: err.status,
       body: {
         error: {
           code: err.code,
-          message: err.message,
-          ...(opts.exposeDetails && err.details !== undefined ? { details: err.details } : {}),
+          message: expose ? err.message : 'Internal server error',
+          ...(expose && err.details !== undefined ? { details: err.details } : {}),
         },
       },
     };

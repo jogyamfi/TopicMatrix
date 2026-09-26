@@ -12,6 +12,7 @@ import {
 import { apiFetch, ApiError } from '../../lib/api-client';
 import { queryKeys } from '../../lib/query-client';
 import { startLauncherRun } from '../../lib/launcher-store';
+import { useAuth } from '../../context/auth-context';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -43,6 +44,7 @@ interface Props {
  */
 export function LaunchReviewDialog({ open, onOpenChange, fixedScope }: Props): React.JSX.Element {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [mode, setMode] = useState<PickableMode>('dueToday');
   const [subjectId, setSubjectId] = useState('');
   const [tagId, setTagId] = useState('');
@@ -73,7 +75,8 @@ export function LaunchReviewDialog({ open, onOpenChange, fixedScope }: Props): R
         setError('No topics match this filter.');
         return;
       }
-      startLauncherRun(data.items);
+      if (!user) return;
+      startLauncherRun(user.id, data.items);
       onOpenChange(false);
       navigate('/review/launch');
     },

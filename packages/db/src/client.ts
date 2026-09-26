@@ -4,8 +4,9 @@ import { PrismaClient as PostgresPrismaClient } from '../generated/postgres/inde
 import type { PrismaClient } from './types.js';
 
 /**
- * Builds the Prisma client for `sqlite`/`postgresql`. Constructed fresh per call — callers
- * (createDb, ultimately AppDeps) are rebuilt per request, matching the P0 NF-15 pattern.
+ * Builds the Prisma client for `sqlite`/`postgresql`. Constructed fresh per call, and each client
+ * owns a connection pool — long-lived callers (the Node API) must reuse one per process via
+ * `createProcessDbCache` (node.ts) rather than calling this per request.
  *
  * D1 is NOT handled here: it needs a live Workers `D1Database` binding (not a `DATABASE_URL`),
  * which only exists inside a `workerd` request. Wiring it into `apps/worker`'s per-request deps

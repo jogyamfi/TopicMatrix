@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { DateRangeSelector } from '../../components/date-range-selector';
 import { resolveDateRange, type DateRangePreset } from '../../lib/date-range';
+import { useUserToday } from '../../lib/use-user-today';
 import { MasteryBarChart } from '../../components/charts/mastery-bar-chart';
 import { TopicHeatmapGrid } from '../../components/charts/topic-heatmap-grid';
 import { RetentionCurveChart } from '../../components/charts/retention-curve-chart';
@@ -131,7 +132,8 @@ function RetentionTab({ subjectId }: { subjectId: string | null }): React.JSX.El
   const [range, setRange] = useState<DateRangePreset>('90');
   const topicsQuery = useTopics(subjectId);
   const target = topicId === WHOLE_SUBJECT ? { subjectId: subjectId ?? '' } : { topicId };
-  const { from, to } = resolveDateRange(range);
+  const today = useUserToday();
+  const { from, to } = resolveDateRange(range, today);
 
   const query = useQuery({
     queryKey: queryKeys.analytics.retention(target, from, to),
@@ -189,7 +191,8 @@ function AccuracyConfidenceTab({ subjectId }: { subjectId: string | null }): Rea
   const [range, setRange] = useState<DateRangePreset>('90');
   const topicsQuery = useTopics(subjectId);
   const target = topicId === WHOLE_SUBJECT ? { subjectId: subjectId ?? '' } : { topicId };
-  const { from, to } = resolveDateRange(range);
+  const today = useUserToday();
+  const { from, to } = resolveDateRange(range, today);
 
   const query = useQuery({
     queryKey: queryKeys.analytics.accuracyConfidence(target, from, to),

@@ -59,4 +59,5 @@ export type { PasswordService, PasswordServiceParams } from './auth/password.js'
 export { createTokenService } from './auth/tokens.js';
 export type { TokenService, AccessTokenClaims, IssuedRefreshToken } from './auth/tokens.js';
 export { randomOpaqueToken, sha256Hex } from './auth/crypto-utils.js';
+export { resolveClientIp } from './client-ip.js';
 

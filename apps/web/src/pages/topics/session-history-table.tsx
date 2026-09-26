@@ -11,6 +11,7 @@ import {
   TableRow,
 } from '../../components/ui/table';
 import { EmptyState } from '../../components/empty-state';
+import { formatDateOnly } from '../../lib/dates';
 
 type SortKey = 'studiedOn' | 'questionsAttempted' | 'accuracy' | 'confidence';
 
@@ -123,7 +124,7 @@ export function SessionHistoryTable({
         <TableBody>
           {pageItems.map((session) => (
             <TableRow key={session.id}>
-              <TableCell>{new Date(session.studiedOn).toLocaleDateString()}</TableCell>
+              <TableCell>{formatDateOnly(session.studiedOn)}</TableCell>
               <TableCell className="text-muted-foreground">{session.sourceLabel ?? '—'}</TableCell>
               <TableCell>
                 {session.questionsCorrect}/{session.questionsAttempted}

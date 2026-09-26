@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { sessionResponseSchema, type StudySessionView } from '@topicmatrix/shared';
 import { apiFetch, ApiError } from '../../lib/api-client';
 import { invalidations } from '../../lib/invalidations';
+import { useUserToday } from '../../lib/use-user-today';
 import { ConfidenceScale } from '../../components/confidence-scale';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -31,6 +32,7 @@ function toIsoDate(value: string): string {
 /** Inline edit for a logged session (FR-4.6) — every edit re-triggers schedule recalculation
  * server-side, so the whole subject tree's scores are invalidated on save. */
 export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): React.JSX.Element {
+  const today = useUserToday();
   const [studiedOn, setStudiedOn] = useState('');
   const [sourceLabel, setSourceLabel] = useState('');
   const [questionsAttempted, setQuestionsAttempted] = useState('');
@@ -96,7 +98,7 @@ export function EditSessionDialog({ session, subjectId, onOpenChange }: Props): 
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-session-date">Date</Label>
-                <Input id="edit-session-date" type="date" required value={studiedOn} onChange={(e) => setStudiedOn(e.target.value)} />
+                <Input id="edit-session-date" type="date" required max={today} value={studiedOn} onChange={(e) => setStudiedOn(e.target.value)} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-session-source">Source</Label>

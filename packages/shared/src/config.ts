@@ -25,6 +25,10 @@ const envSchema = z.object({
   ARGON2_MEMORY_KIB: z.coerce.number().int().positive().default(19456),
   ARGON2_ITERATIONS: z.coerce.number().int().positive().default(2),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  // Number of reverse proxies in front of the Node API whose X-Forwarded-For entries are
+  // trusted (e.g. 1 for the docker-compose nginx). 0 = use the socket address only, since a
+  // client can put anything in X-Forwarded-For when nothing trusted rewrites it.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
 });
 
 export type RawEnv = Record<string, string | undefined>;
@@ -39,6 +43,7 @@ export interface AppConfig {
   argon2MemoryKib: number;
   argon2Iterations: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  trustProxyHops: number;
 }
 
 export class ConfigError extends Error {
@@ -81,5 +86,6 @@ export function parseConfig(env: RawEnv): AppConfig {
     argon2MemoryKib: data.ARGON2_MEMORY_KIB,
     argon2Iterations: data.ARGON2_ITERATIONS,
     logLevel: data.LOG_LEVEL,
+    trustProxyHops: data.TRUST_PROXY_HOPS,
   };
 }

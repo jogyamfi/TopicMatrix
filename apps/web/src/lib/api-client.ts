@@ -1,30 +1,12 @@
 import type { z } from 'zod';
 import { authStore } from './auth-store';
+import { toApiError } from './api-error';
 
 // The typed API client (P6 task 3): every response is parsed through a Zod schema at the
 // boundary — a shape mismatch throws loudly instead of producing a silent `undefined` deep in a
 // component. Also implements silent-refresh-on-401-then-replay-once (P6 task 5).
 
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string | undefined;
-
-  constructor(status: number, code: string | undefined, message: string) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = code;
-  }
-}
-
-interface ErrorBody {
-  error?: { code?: string; message?: string };
-}
-
-async function toApiError(res: Response): Promise<ApiError> {
-  const body = (await res.json().catch(() => null)) as ErrorBody | null;
-  return new ApiError(res.status, body?.error?.code, body?.error?.message ?? res.statusText);
-}
+export { ApiError } from './api-error';
 
 export interface ApiFetchOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';

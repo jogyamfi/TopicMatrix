@@ -13,11 +13,11 @@ import { EmptyState } from '../../components/empty-state';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { SubjectDialog } from './subject-dialog';
 import { DeleteSubjectDialog } from './delete-subject-dialog';
+import { formatDateOnly } from '../../lib/dates';
 
 function formatLastActivity(lastActivityOn: string | null): string {
   if (!lastActivityOn) return 'No sessions yet';
-  const date = new Date(lastActivityOn);
-  return `Last studied ${date.toLocaleDateString()}`;
+  return `Last studied ${formatDateOnly(lastActivityOn)}`;
 }
 
 function SubjectCard({

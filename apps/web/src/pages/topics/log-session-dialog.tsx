@@ -7,6 +7,7 @@ import {
 } from '@topicmatrix/shared';
 import { apiFetch, ApiError } from '../../lib/api-client';
 import { invalidations } from '../../lib/invalidations';
+import { useUserToday } from '../../lib/use-user-today';
 import { toast } from '../../lib/toast-store';
 import { ConfidenceScale } from '../../components/confidence-scale';
 import { Button } from '../../components/ui/button';
@@ -24,14 +25,6 @@ import {
 
 const GRADE_LABELS: Record<number, string> = { 1: 'Again', 2: 'Hard', 3: 'Good', 4: 'Easy' };
 
-function todayIsoDate(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
 interface Props {
   topic: { id: string; subjectId: string; name: string } | null;
   onOpenChange: (open: boolean) => void;
@@ -46,7 +39,10 @@ interface Props {
  * required interaction beyond filling in the two question counts and picking confidence.
  */
 export function LogSessionDialog({ topic, onOpenChange, onLogged }: Props): React.JSX.Element {
-  const [studiedOn, setStudiedOn] = useState(todayIsoDate());
+  const today = useUserToday();
+  // `null` = the user hasn't picked a date, so the session is for "today" — and today is left
+  // for the server to resolve (timezone + dayStartHour, FR-5.9) rather than sent from here.
+  const [studiedOn, setStudiedOn] = useState<string | null>(null);
   const [sourceLabel, setSourceLabel] = useState('');
   const [questionsAttempted, setQuestionsAttempted] = useState('');
   const [questionsCorrect, setQuestionsCorrect] = useState('');
@@ -59,7 +55,7 @@ export function LogSessionDialog({ topic, onOpenChange, onLogged }: Props): Reac
 
   useEffect(() => {
     if (!topic) return;
-    setStudiedOn(todayIsoDate());
+    setStudiedOn(null);
     setSourceLabel('');
     setQuestionsAttempted('');
     setQuestionsCorrect('');
@@ -92,7 +88,7 @@ export function LogSessionDialog({ topic, onOpenChange, onLogged }: Props): Reac
       // string) — CreateStudySessionRequest is the POST-transform (Date) type, so it isn't used
       // for this literal (see repo memory's parseJsonBody note on transform()-based schemas).
       const body = {
-        studiedOn,
+        ...(studiedOn !== null ? { studiedOn } : {}),
         sourceLabel: sourceLabel.trim().length > 0 ? sourceLabel : null,
         questionsAttempted: attempted,
         questionsCorrect: correct,
@@ -140,8 +136,8 @@ export function LogSessionDialog({ topic, onOpenChange, onLogged }: Props): Reac
                   id="session-date"
                   type="date"
                   required
-                  max={todayIsoDate()}
-                  value={studiedOn}
+                  max={today}
+                  value={studiedOn ?? today}
                   onChange={(e) => setStudiedOn(e.target.value)}
                 />
               </div>

@@ -34,6 +34,16 @@ persistent deployment, put it in a `.env` file next to `docker-compose.yml` inst
 (`JWT_SECRET=...`), which Docker Compose reads automatically, or use `docker compose`'s secrets
 support.
 
+### Reverse proxies and the client IP
+
+Login attempts are rate-limited per client IP (10 per 15 minutes). Inside the compose stack the
+API only ever sees connections from the `web` nginx container, so `docker-compose.yml` sets
+`TRUST_PROXY_HOPS: '1'` to read the real client address from the `X-Forwarded-For` header that
+nginx appends. If you put another reverse proxy in front (for example Caddy or Traefik
+terminating TLS), raise it by one for each extra proxy that appends to `X-Forwarded-For`. Never
+set it higher than the real number of proxies: every extra hop lets a client choose the IP it is
+rate-limited as.
+
 ### Updating
 
 ```bash

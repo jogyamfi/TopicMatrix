@@ -25,3 +25,37 @@ export function createNodeDb(config: AppConfig): Db {
     disconnect: () => client.$disconnect(),
   };
 }
+
+export interface ProcessDbCache {
+  /** Drop-in for `createNodeDb` as a `buildDeps` `createDb` option — same config, same `Db`. */
+  getDb(config: AppConfig): Db;
+  disconnectAll(): Promise<void>;
+}
+
+/**
+ * A Prisma client owns a connection pool, so the Node entrypoint must build ONE per process and
+ * reuse it — calling `createNodeDb` per request (as `buildDeps` does with whatever `createDb` it
+ * is given) opens a fresh pool on every request and never closes it, exhausting PostgreSQL's
+ * connections. Like the rate limiter, the pool is process-scoped infrastructure: the deliberate
+ * exception to NF-15's "rebuilt per request", which only ever applied to request-derived state.
+ * Keyed by provider + URL so a (theoretical) config change still gets a matching client.
+ */
+export function createProcessDbCache(): ProcessDbCache {
+  const dbsByKey = new Map<string, Db>();
+  return {
+    getDb(config) {
+      const key = `${config.databaseProvider}\u0000${config.databaseUrl ?? ''}`;
+      let db = dbsByKey.get(key);
+      if (!db) {
+        db = createNodeDb(config);
+        dbsByKey.set(key, db);
+      }
+      return db;
+    },
+    async disconnectAll() {
+      const dbs = [...dbsByKey.values()];
+      dbsByKey.clear();
+      await Promise.all(dbs.map((db) => db.disconnect()));
+    },
+  };
+}

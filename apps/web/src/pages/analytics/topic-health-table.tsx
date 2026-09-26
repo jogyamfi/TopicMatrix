@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { HealthStatusBadge, type HealthStatus } from '../../components/health-status-badge';
 import { EmptyState } from '../../components/empty-state';
+import { formatDateOnly } from '../../lib/dates';
 
 type Row = TopicHealthResponse['topics'][number];
 type SortKey = 'name' | 'subjectName' | 'score' | 'healthStatus' | 'lastReviewedOn' | 'nextReviewOn' | 'accuracyPct' | 'confidencePct';
@@ -152,8 +153,8 @@ export function TopicHealthTable({ topics }: { topics: Row[] }): React.JSX.Eleme
                 <TableCell>
                   <HealthStatusBadge status={row.healthStatus as HealthStatus} />
                 </TableCell>
-                <TableCell>{row.lastReviewedOn ? row.lastReviewedOn.slice(0, 10) : '\u2014'}</TableCell>
-                <TableCell>{row.nextReviewOn ? row.nextReviewOn.slice(0, 10) : '\u2014'}</TableCell>
+                <TableCell>{row.lastReviewedOn ? formatDateOnly(row.lastReviewedOn) : '\u2014'}</TableCell>
+                <TableCell>{row.nextReviewOn ? formatDateOnly(row.nextReviewOn) : '\u2014'}</TableCell>
                 <TableCell>{row.accuracyPct === null ? '\u2014' : Math.round(row.accuracyPct)}</TableCell>
                 <TableCell>{row.confidencePct === null ? '\u2014' : Math.round(row.confidencePct)}</TableCell>
                 <TableCell>
