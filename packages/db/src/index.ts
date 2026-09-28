@@ -31,9 +31,9 @@ export {
 } from './account-writes.js';
 export { deleteTag } from './tag-writes.js';
 export { REVOKED_TOKEN_RETENTION_MS } from './repositories/refresh-token.js';
-export { computeSubjectTopicMetrics, computeTopicMetrics } from './topic-metrics.js';
+export { computeSubjectTopicMetrics, computeTopicMetrics, computeTopicMetricsFromData } from './topic-metrics.js';
 export type { TopicScoreMetrics } from './topic-metrics.js';
-export { computeSubjectSummary } from './subject-summary.js';
+export { computeSubjectSummary, computeSubjectSummaries } from './subject-summary.js';
 export type { SubjectSummary } from './subject-summary.js';
 export { computeReviewQueue, buildReviewSession } from './review-queue.js';
 export type {
@@ -107,6 +107,7 @@ export type {
   StudySessionRepository,
   CreateStudySessionInput,
   UpdateStudySessionInput,
+  SessionScoringRow,
 } from './repositories/study-session.js';
 export type {
   ReviewScheduleRepository,

@@ -22,6 +22,9 @@ export function createNodeDb(config: AppConfig): Db {
     provider: config.databaseProvider,
     ...buildRepositories(client),
     unitOfWork: createSqlUnitOfWork(client),
+    ping: async () => {
+      await client.$queryRaw`SELECT 1`;
+    },
     disconnect: () => client.$disconnect(),
   };
 }

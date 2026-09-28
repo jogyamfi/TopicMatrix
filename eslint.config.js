@@ -79,6 +79,14 @@ export default tseslint.config(
     },
   },
   {
+    // Plain browser scripts served as-is from apps/web/public (e.g. the pre-paint theme script,
+    // kept out of index.html so the CSP needs no 'unsafe-inline').
+    files: ['apps/web/public/**/*.js'],
+    languageOptions: {
+      globals: { window: 'readonly', document: 'readonly', localStorage: 'readonly' },
+    },
+  },
+  {
     // Root-level tooling scripts run under Node directly; they are exempt from NF-13
     // (which governs application code) and need Node globals recognised.
     files: ['scripts/**/*.mjs', '*.config.{js,ts,mjs}'],

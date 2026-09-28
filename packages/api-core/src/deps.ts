@@ -8,6 +8,8 @@ import type { PasswordService, PasswordServiceParams } from './auth/password.js'
 /** RateLimiter is stateless-by-construction: real implementations differ per runtime (SEC-8). */
 export interface RateLimiter {
   consume(key: string): Promise<{ allowed: boolean; remaining: number }>;
+  /** Forgets `key`'s attempts (e.g. a successful login clears that email's failures). */
+  reset(key: string): Promise<void>;
 }
 
 /**
@@ -19,6 +21,7 @@ export interface RateLimiter {
 export function createAllowAllRateLimiter(): RateLimiter {
   return {
     consume: async () => ({ allowed: true, remaining: Number.POSITIVE_INFINITY }),
+    reset: async () => {},
   };
 }
 

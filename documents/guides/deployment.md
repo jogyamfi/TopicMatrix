@@ -34,6 +34,38 @@ persistent deployment, put it in a `.env` file next to `docker-compose.yml` inst
 (`JWT_SECRET=...`), which Docker Compose reads automatically, or use `docker compose`'s secrets
 support.
 
+### HTTPS (required beyond localhost)
+
+The session's refresh cookie is `Secure`, so browsers only send it over HTTPS, with one exception:
+`http://localhost`. Opening the stack at `http://localhost:8080` on the machine running it works.
+Opening it at `http://192.168.x.x:8080` from another device does not: you can sign in, but every
+page reload signs you out again.
+
+For anything past a local trial, put a TLS-terminating reverse proxy in front of the `web`
+container. For example, with [Caddy](https://caddyserver.com/), which obtains and renews
+certificates automatically, add this to `docker-compose.yml`:
+
+```yaml
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    command: caddy reverse-proxy --from topicmatrix.example.com --to web:80
+    volumes:
+      - caddy-data:/data
+```
+
+Add `caddy-data:` under `volumes:` as well. Remove the `web` service's `ports:` so the app is only
+reachable through Caddy, and raise `TRUST_PROXY_HOPS` to `'2'` (Caddy, then nginx), as described
+below.
+
+For a quick trial over plain http on your LAN, you can set `COOKIE_SECURE: 'false'` on the `api`
+service instead. The API refuses to start with that setting when `NODE_ENV=production`, which the
+compose file sets, so you'd also have to change `NODE_ENV`. It is a trial-only escape hatch, never
+for real use.
+
 ### Reverse proxies and the client IP
 
 Login attempts are rate-limited per client IP (10 per 15 minutes). Inside the compose stack the

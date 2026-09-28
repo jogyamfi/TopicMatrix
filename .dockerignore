@@ -8,8 +8,10 @@ coverage
 .github
 .wrangler
 .turbo
-*.tsbuildinfo
-*.log
+# Docker's ignore patterns only match at the root unless prefixed with **/ — a nested
+# tsconfig.tsbuildinfo slipping in (with its dist/ excluded) breaks `tsc -b` in the image (TS6305).
+**/*.tsbuildinfo
+**/*.log
 .env
 .env.*.local
 e2e

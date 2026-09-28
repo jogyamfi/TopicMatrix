@@ -1,5 +1,6 @@
 // Node-only dev/CI test tooling (exempt from NF-13, same rationale as packages/db/test/*).
-// Provisions its own real, migrated temp SQLite database rather than importing
+// Provisions its own real, migrated scratch database (SQLite, or PostgreSQL when
+// DATABASE_PROVIDER=postgresql) rather than importing
 // packages/db/test/setup.ts across the package boundary — Vite/vitest's module resolution
 // couldn't reliably load a `.js`-specifier relative import reaching outside this package's
 // directory tree in practice, and keeping each package's test infra self-contained avoids that
@@ -50,12 +51,46 @@ function testConfig(overrides: Partial<AppConfig>): AppConfig {
     logLevel: 'error',
     trustProxyHops: 0,
     defaultTimezone: 'Europe/London',
+    cookieSecure: true,
     ...overrides,
   };
 }
 
-/** Same approach as packages/db/test/setup.ts — a fresh temp SQLite file, migrated for real. */
-export async function setupApiTest(options: SetupApiTestOptions = {}): Promise<ApiTestContext> {
+interface ScratchDatabase {
+  provider: 'sqlite' | 'postgresql';
+  databaseUrl: string;
+  destroy: () => void;
+}
+
+/**
+ * A fresh, fully migrated database for one test context. SQLite (the default): a temp file.
+ * PostgreSQL (`DATABASE_PROVIDER=postgresql`, R5): a uniquely named schema in the server at
+ * DATABASE_URL (default: docker-compose.dev.yml's), dropped afterwards — as isolated as the
+ * SQLite files, so the whole route suite can run against real PostgreSQL too.
+ */
+function createScratchDatabase(): ScratchDatabase {
+  if (process.env.DATABASE_PROVIDER === 'postgresql') {
+    const serverUrl =
+      process.env.DATABASE_URL ?? 'postgresql://topicmatrix:topicmatrix@localhost:5432/topicmatrix';
+    const schema = `api_test_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const databaseUrl = `${serverUrl}${serverUrl.includes('?') ? '&' : '?'}schema=${schema}`;
+    execSync('npx prisma migrate deploy --schema=prisma/postgres/schema.prisma', {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+    });
+    return {
+      provider: 'postgresql',
+      databaseUrl,
+      destroy: () =>
+        execSync(`npx prisma db execute --url "${serverUrl}" --stdin`, {
+          cwd: repoRoot,
+          input: `DROP SCHEMA IF EXISTS "${schema}" CASCADE;`,
+          stdio: ['pipe', 'ignore', 'inherit'],
+        }),
+    };
+  }
+
   const tmpDir = mkdtempSync(path.join(tmpdir(), 'topicmatrix-api-core-test-'));
   const databaseUrl = `file:${path.join(tmpDir, 'test.db').split(path.sep).join('/')}`;
   execSync('npx prisma migrate deploy --schema=prisma/sqlite/schema.prisma', {
@@ -63,8 +98,16 @@ export async function setupApiTest(options: SetupApiTestOptions = {}): Promise<A
     stdio: 'inherit',
     env: { ...process.env, DATABASE_URL: databaseUrl },
   });
+  return { provider: 'sqlite', databaseUrl, destroy: () => rmSync(tmpDir, { recursive: true, force: true }) };
+}
 
-  const config = testConfig({ databaseUrl, ...(options.configOverrides ?? {}) });
+export async function setupApiTest(options: SetupApiTestOptions = {}): Promise<ApiTestContext> {
+  const scratch = createScratchDatabase();
+  const config = testConfig({
+    databaseProvider: scratch.provider,
+    databaseUrl: scratch.databaseUrl,
+    ...(options.configOverrides ?? {}),
+  });
   const db = createNodeDb(config);
   const clientIp = options.clientIp ?? '127.0.0.1';
 
@@ -90,7 +133,7 @@ export async function setupApiTest(options: SetupApiTestOptions = {}): Promise<A
     fixtures: createFixtures(db),
     teardown: async () => {
       await db.disconnect();
-      rmSync(tmpDir, { recursive: true, force: true });
+      scratch.destroy();
     },
   };
 }

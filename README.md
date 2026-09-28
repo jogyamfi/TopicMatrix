@@ -78,6 +78,8 @@ documents/planning/        SRS, delivery plan, ADRs, phase handover notes
 | `npm run test:integration:pg` | Same suite against PostgreSQL — needs `docker-compose.dev.yml` running |
 | `npm run test:coverage` | Unit + integration suites together, with the NF-6 coverage gate (≥70% overall, ≥90% `packages/core`) |
 | `npm run test:e2e` | Playwright end-to-end suite (first run: `npx playwright install chromium`) |
+| `npm run test:e2e:docker` | The same suite against a fresh `docker compose` stack on `:8080` — setup steps in `playwright.docker.config.ts` |
+| `npm run seed:perf -w apps/api` / `perf:measure -w apps/api` | NF-1 dataset (20 subjects / 2,000 topics / 20,000 sessions) and endpoint timings — point `DATABASE_URL` at a scratch database |
 | `npm run audit` | Production-dependency security audit gate (SEC-9) — see `scripts/check-audit.mjs` |
 
 ## Self-hosted deployment (Docker) and backups

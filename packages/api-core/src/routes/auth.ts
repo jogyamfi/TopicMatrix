@@ -34,11 +34,14 @@ export const REFRESH_REUSE_GRACE_MS = 30_000;
 const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$L79NmRawXzamxvGo7kf+MrQzaEsZ6ejFeeYjBeWz19M';
 
-/** HttpOnly; Secure; SameSite=Strict (FR-1.3) — never readable/settable from client script. */
+/**
+ * HttpOnly; Secure; SameSite=Strict (FR-1.3) — never readable/settable from client script.
+ * `Secure` can only be dropped with COOKIE_SECURE=false outside production (plain-http trials).
+ */
 function setRefreshCookie(c: Context<AppEnv>, token: string, expiresAt: Date): void {
   setCookie(c, REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: true,
+    secure: c.get('deps').config.cookieSecure,
     sameSite: 'Strict',
     path: '/',
     expires: expiresAt,
@@ -81,6 +84,11 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
       await recordAudit(deps, { action: 'auth.login.failure', metadata: { emailNormalised } });
       throw new AppError('UNAUTHORIZED', 'Invalid email or password');
     }
+
+    // A successful login clears this email's failed attempts, so a user who mistyped a few times
+    // isn't locked out later by old failures. The per-IP counter is deliberately NOT reset:
+    // anyone with one valid account could otherwise wipe it and keep guessing at others.
+    await deps.rateLimiter.reset(`login:email:${emailNormalised}`);
 
     // Housekeeping: drop this user's expired and long-revoked refresh tokens.
     await deps.db.refreshTokens.purgeStaleForUser(user.id, deps.clock());

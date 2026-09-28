@@ -40,6 +40,8 @@ export interface Db {
   refreshTokens: RefreshTokenRepository;
   auditLogs: AuditLogRepository;
   unitOfWork: UnitOfWork;
+  /** A trivial round trip (`SELECT 1`) — rejects if the database can't be reached (`/readyz`). */
+  ping(): Promise<void>;
   disconnect(): Promise<void>;
 }
 
@@ -107,6 +109,9 @@ function unimplementedD1Db(): Db {
     refreshTokens: unimplemented('RefreshTokenRepository'),
     auditLogs: unimplemented('AuditLogRepository'),
     unitOfWork: createD1UnitOfWork(),
+    // No live D1 binding is wired yet (P11), so there is nothing to reach; `/readyz` on the Worker
+    // stays as ready as it was until then.
+    ping: async () => {},
     disconnect: async () => {},
   };
 }

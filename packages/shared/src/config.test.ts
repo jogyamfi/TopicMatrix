@@ -18,6 +18,12 @@ describe('parseConfig', () => {
     expect(config.trustProxyHops).toBe(0);
   });
 
+  it('allows COOKIE_SECURE=false only outside production', () => {
+    expect(parseConfig(validEnv).cookieSecure).toBe(true);
+    expect(parseConfig({ ...validEnv, COOKIE_SECURE: 'false' }).cookieSecure).toBe(false);
+    expect(() => parseConfig({ ...validEnv, COOKIE_SECURE: 'false', NODE_ENV: 'production' })).toThrow(ConfigError);
+  });
+
   it('accepts a valid DEFAULT_TIMEZONE and rejects an unknown one', () => {
     expect(parseConfig({ ...validEnv, DEFAULT_TIMEZONE: 'America/New_York' }).defaultTimezone).toBe(
       'America/New_York',

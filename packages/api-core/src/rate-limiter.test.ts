@@ -22,4 +22,37 @@ describe('createMemoryRateLimiter', () => {
     expect((await limiter.consume('k')).remaining).toBe(1);
     expect((await limiter.consume('k')).remaining).toBe(0);
   });
+
+  it('forgets a key on reset', async () => {
+    const limiter = createMemoryRateLimiter({ windowMs: 60_000, maxAttempts: 1 });
+    await limiter.consume('k');
+    expect((await limiter.consume('k')).allowed).toBe(false);
+    await limiter.reset('k');
+    expect((await limiter.consume('k')).allowed).toBe(true);
+  });
+
+  it('evicts keys whose attempts have all expired, at most once per window (R5)', async () => {
+    let now = 0;
+    const limiter = createMemoryRateLimiter({ windowMs: 1_000, maxAttempts: 5, now: () => now });
+    for (let i = 0; i < 100; i += 1) {
+      await limiter.consume(`ip-${i}`);
+    }
+    expect(limiter.size()).toBe(100);
+
+    now = 1_500; // a full window later: every one of those attempts has expired
+    await limiter.consume('fresh');
+    expect(limiter.size()).toBe(1);
+  });
+
+  it('never evicts a key that still has attempts inside the window', async () => {
+    let now = 0;
+    const limiter = createMemoryRateLimiter({ windowMs: 1_000, maxAttempts: 2, now: () => now });
+    await limiter.consume('old');
+    now = 900;
+    await limiter.consume('recent');
+    now = 1_200; // "old" has expired, "recent" hasn't
+    await limiter.consume('recent');
+    expect(limiter.size()).toBe(1);
+    expect((await limiter.consume('recent')).allowed).toBe(false);
+  });
 });

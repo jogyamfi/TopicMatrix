@@ -2,8 +2,8 @@
 # need every package.json present to resolve the dependency graph), not apps/api. Runs the same
 # `tsx src/index.ts` entrypoint as local dev (apps/api/package.json's own "start" script) rather
 # than a separate compiled-JS path, since that's the only entrypoint this repo's own scripts
-# already exercise. NOT verified with a real `docker build`/`docker compose up` on this machine
-# (no Docker available here) — see documents/planning/progress.md's P10 handover notes.
+# already exercise. Verified end to end in R5: a fresh `docker compose up --build` passes the full
+# E2E suite (`npm run test:e2e:docker`).
 FROM node:20-alpine AS base
 WORKDIR /app
 # Prisma's query engine needs OpenSSL; libc6-compat helps some native addons run on musl.
@@ -23,10 +23,12 @@ RUN npm ci
 FROM deps AS runtime
 COPY . .
 ENV NODE_ENV=production
-# Only used to generate the PostgreSQL Prisma client at build time — no DB connection needed for
-# `prisma generate` itself; the real DATABASE_URL is supplied at container run time (compose).
 ENV DATABASE_PROVIDER=postgresql
-RUN npm run db:generate-schemas && npx prisma generate --schema=prisma/postgres/schema.prisma
+# All three Prisma clients, not just PostgreSQL's: packages/db's Node entry imports the SQLite and
+# PostgreSQL clients statically (the provider is picked at runtime), so a missing SQLite client
+# crashes the API at startup (found when this stack was first run for real, R5). `prisma generate`
+# needs no database connection; the real DATABASE_URL is supplied at run time (compose).
+RUN npm run db:generate
 EXPOSE 3000
 # `migrate deploy` (non-interactive, production-safe) runs against the REAL DATABASE_URL at
 # container start, then the server starts — never `migrate dev`, which prompts interactively.

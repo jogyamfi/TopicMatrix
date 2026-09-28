@@ -340,6 +340,35 @@ and archive.
 
 ## Phase R5 — Performance, operations & hardening
 
+**Status: implemented** (item 6, the react-router 7 upgrade, is planned as its own PR). Notes:
+- **P-1 / NF-1:** before/after numbers are in `progress.md` ("NF-1 performance measurement").
+  `/subjects` went from 5.8 s to 185 ms p50; the dashboard (359 → 184 ms p95) and tree (69 →
+  31 ms p95) now meet NF-1. Lean `SessionScoringRow` reads were the main lever.
+- **O-1:** 4xx are logged at `warn` and 5xx at `error` with the stack. An inbound `x-request-id`
+  must match `[A-Za-z0-9_-]{1,64}`. The memory rate limiter sweeps expired keys once per window. A
+  successful login resets that email's counter (the per-IP one deliberately stays). `/readyz`
+  pings the database and answers 503 when it can't reach it.
+- **O-2:** the SPA has the API's CSP and security headers via an nginx snippet included in every
+  location, plus gzip, immutable caching for `/assets/*` and `no-cache` for everything else. The
+  pre-paint theme script moved out of `index.html` into `/theme-init.js` so the CSP needs no
+  `'unsafe-inline'`.
+- **O-3:** there is a `COOKIE_SECURE=false` trial-only escape hatch, refused in production, and
+  `deployment.md` has an HTTPS section with a Caddy example.
+- **Item 7, found on the first real PostgreSQL run:** the P1 PostgreSQL init migration (and the D1
+  one) began with a UTF-8 byte-order mark, which PostgreSQL rejects. `prisma migrate deploy`, and
+  so the Docker stack, could never have started on a fresh database. The BOMs are stripped and a
+  unit test guards every migration file. The API route tests now also run on PostgreSQL (one
+  schema per test context), and the db tests got the same per-run schema isolation.
+- **Item 7, found on the first real Docker run:** two more blockers. (1) `.dockerignore`'s
+  `*.tsbuildinfo` only matched at the repo root, so a nested `tsconfig.tsbuildinfo` from any local
+  typecheck made the web image's `tsc -b` fail (TS6305); the pattern is now `**/*.tsbuildinfo`.
+  (2) The API image generated only the PostgreSQL Prisma client, but `packages/db`'s Node entry
+  imports the SQLite client too, so the API crashed on start; it now runs `npm run db:generate`.
+  From a fresh `docker compose up --build`, the full E2E suite passes against
+  `http://localhost:8080` (`npm run test:e2e:docker`), including the axe scans under the new CSP.
+  Toast assertions in the spec go through an `expectToast` helper: Radix Toast briefly renders a
+  hidden screen-reader copy of each toast, which a plain `getByText` sometimes matched twice.
+
 1. **P-1: remove the N+1s.**
    - Batch the `GET /subjects` summaries: one bulk read each of topics, sessions and schedules for
      all of the user's subjects, then group in memory. This is the same pattern as

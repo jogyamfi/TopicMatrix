@@ -219,6 +219,23 @@ describe('auth routes', () => {
     });
   });
 
+  it('sets a Secure refresh cookie unless COOKIE_SECURE=false (plain-http trials, R5)', async () => {
+    const user = await createActiveUser(ctx, 'correct-horse-battery');
+    const secure = await ctx.app.request(loginRequest(user.email, 'correct-horse-battery'));
+    expect(secure.headers.get('set-cookie')).toMatch(/;\s*Secure/i);
+
+    const httpCtx = await setupApiTest({ configOverrides: { cookieSecure: false } });
+    try {
+      const httpUser = await createActiveUser(httpCtx, 'correct-horse-battery');
+      const plain = await httpCtx.app.request(loginRequest(httpUser.email, 'correct-horse-battery'));
+      expect(plain.status).toBe(200);
+      expect(plain.headers.get('set-cookie')).not.toMatch(/;\s*Secure/i);
+      expect(plain.headers.get('set-cookie')).toMatch(/HttpOnly/i);
+    } finally {
+      await httpCtx.teardown();
+    }
+  });
+
   it('change-password updates the hash, clears mustChangePassword, and revokes existing refresh tokens', async () => {
     const user = await createActiveUser(ctx, 'old-password-123', { mustChangePassword: true });
     const login = await ctx.app.request(loginRequest(user.email, 'old-password-123'));

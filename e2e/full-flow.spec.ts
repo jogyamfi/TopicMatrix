@@ -17,6 +17,15 @@ function primaryNav(page: Page) {
   return page.getByRole('navigation', { name: 'Primary' });
 }
 
+/**
+ * Asserts a toast is showing. Radix Toast briefly renders a visually-hidden copy of each new
+ * toast for screen-reader announcement, so a plain getByText can match twice (seen against the
+ * faster production build) — this checks the visible toast only.
+ */
+async function expectToast(page: Page, text: string): Promise<void> {
+  await expect(page.getByRole('status').filter({ hasText: text }).first()).toBeVisible();
+}
+
 test('first-run admin seed through export (P10 acceptance criteria)', async ({ page }) => {
   await test.step('login with the seeded temporary password', async () => {
     await page.goto('/login');
@@ -132,7 +141,7 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
     await primaryNav(page).getByRole('link', { name: 'Settings' }).click();
     await page.getByLabel('Day starts at (hour, 0-23)').fill('5');
     await page.getByRole('button', { name: 'Save settings' }).click();
-    await expect(page.getByText('Settings saved')).toBeVisible();
+    await expectToast(page, 'Settings saved');
   });
 
   await test.step('jump to a topic from anywhere with Ctrl+K (R4)', async () => {
@@ -148,12 +157,12 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
   await test.step('archive and unarchive a subject (R4)', async () => {
     await primaryNav(page).getByRole('link', { name: 'Subjects' }).click();
     await page.getByRole('button', { name: 'Archive Mathematics' }).click();
-    await expect(page.getByText('Mathematics archived')).toBeVisible();
+    await expectToast(page, 'Mathematics archived');
     await expect(page.getByRole('link', { name: 'Mathematics' })).toBeHidden();
 
     await page.getByLabel('Show archived').check();
     await page.getByRole('button', { name: 'Unarchive' }).click();
-    await expect(page.getByText('Mathematics unarchived')).toBeVisible();
+    await expectToast(page, 'Mathematics unarchived');
     await page.getByLabel('Show archived').uncheck();
     await expect(page.getByRole('link', { name: 'Mathematics' })).toBeVisible();
   });
@@ -218,7 +227,7 @@ test.describe('on a device in another timezone', () => {
     const banner = page.getByRole('region', { name: 'Timezone' });
     await expect(banner).toContainText('America/New_York');
     await banner.getByRole('button', { name: 'Use America/New_York' }).click();
-    await expect(page.getByText('Now using America/New_York.')).toBeVisible();
+    await expectToast(page, 'Now using America/New_York.');
     await expect(banner).toBeHidden();
   });
 });

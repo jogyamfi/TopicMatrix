@@ -13,6 +13,30 @@ export interface CreateStudySessionInput {
   gradeUsed?: number | null;
 }
 
+/**
+ * Just the columns scoring, health, streaks and summaries read (R5). At NF-1 scale (20,000
+ * sessions) building full rows dominates request time, so bulk reads select only these.
+ */
+export interface SessionScoringRow {
+  topicId: string;
+  studiedOn: Date;
+  questionsAttempted: number;
+  questionsCorrect: number;
+  accuracy: number;
+  confidence: number;
+  durationMinutes: number | null;
+}
+
+const SCORING_COLUMNS = {
+  topicId: true,
+  studiedOn: true,
+  questionsAttempted: true,
+  questionsCorrect: true,
+  accuracy: true,
+  confidence: true,
+  durationMinutes: true,
+} as const;
+
 export type UpdateStudySessionInput = Partial<
   Omit<CreateStudySessionInput, 'topicId'>
 >;
@@ -27,6 +51,15 @@ export interface StudySessionRepository {
    */
   listAllForUser(userId: string, opts?: { skip?: number; take?: number }): Promise<StudySession[]>;
   findById(userId: string, sessionId: string): Promise<StudySession | null>;
+  /**
+   * Every session the user owns as lean `SessionScoringRow`s, optionally only on/after `from`.
+   * Filters on the indexed `userId` column directly — no join through topic/subject.
+   */
+  listScoringRowsForUser(userId: string, opts?: { from?: Date }): Promise<SessionScoringRow[]>;
+  /** Lean rows for the listed topics only (one subject's tree) — by topic id, no join. */
+  listScoringRowsForTopics(userId: string, topicIds: readonly string[]): Promise<SessionScoringRow[]>;
+  /** Each distinct day the user studied on (streaks), without loading the sessions themselves. */
+  listStudyDaysForUser(userId: string): Promise<Date[]>;
   /** `accuracy` is always computed here from questionsCorrect/questionsAttempted (FR-4.2) — never accepted as input. */
   create(userId: string, input: CreateStudySessionInput): Promise<StudySession>;
   update(userId: string, sessionId: string, patch: UpdateStudySessionInput): Promise<StudySession>;
@@ -71,6 +104,24 @@ export function createStudySessionRepository(client: PrismaClientOrTx): StudySes
         ...(opts?.take !== undefined ? { take: opts.take } : {}),
       }),
     findById: (userId, sessionId) => client.studySession.findFirst({ where: { id: sessionId, userId } }),
+    listScoringRowsForUser: (userId, opts) =>
+      client.studySession.findMany({
+        where: { userId, ...(opts?.from ? { studiedOn: { gte: opts.from } } : {}) },
+        select: SCORING_COLUMNS,
+      }),
+    listScoringRowsForTopics: (userId, topicIds) =>
+      client.studySession.findMany({
+        where: { userId, topicId: { in: [...topicIds] } },
+        select: SCORING_COLUMNS,
+      }),
+    listStudyDaysForUser: async (userId) =>
+      (
+        await client.studySession.findMany({
+          where: { userId },
+          select: { studiedOn: true },
+          distinct: ['studiedOn'],
+        })
+      ).map((row) => row.studiedOn),
     create: async (userId, input) => {
       const topic = await client.topic.findFirst({
         where: { id: input.topicId, subject: { userId } },

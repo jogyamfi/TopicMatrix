@@ -1,4 +1,4 @@
-﻿-- D1 SQL derived from prisma/d1/schema.prisma via `prisma migrate diff --from-empty
+-- D1 SQL derived from prisma/d1/schema.prisma via `prisma migrate diff --from-empty
 -- --to-schema-datamodel` (no live D1/DB connection needed to generate it). Applied with
 -- `wrangler d1 migrations apply` at P11 — see documents/planning/adr-001-data-access.md.
 -- Regenerate with:
