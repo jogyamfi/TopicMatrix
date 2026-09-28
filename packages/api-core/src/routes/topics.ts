@@ -48,6 +48,8 @@ function withoutUndefined<T extends object>(obj: T): { [K in keyof T]: Exclude<T
   return result;
 }
 
+const TOPIC_SEARCH_LIMIT = 20;
+
 /**
  * Topics (FR-3.*, delivery-plan.md P4). Every route is scoped to the authenticated user via
  * the subject-ownership join baked into every TopicRepository method.
@@ -73,6 +75,35 @@ export function registerTopicRoutes(app: Hono<AppEnv>): void {
         }
         return toTopicView(topic, topicMetrics);
       }),
+    });
+  });
+
+  // Jump-to and topic pickers across every subject (R4, U-11). Registered before `/topics/:id`
+  // so "search" isn't taken for an id.
+  app.get('/topics/search', async (c) => {
+    const deps = c.get('deps');
+    const user = getAuthUser(c);
+    const query = (c.req.query('q') ?? '').trim();
+    if (query.length === 0) {
+      return c.json({ topics: [] });
+    }
+    const matches = await deps.db.topics.search(user.id, query.slice(0, 120), TOPIC_SEARCH_LIMIT);
+
+    // Ancestor names for disambiguation ("Algebra › Quadratics"), from the materialised paths —
+    // one lookup for every ancestor of every match.
+    const ancestorIdsOf = (path: string) => path.split('/').filter(Boolean).slice(0, -1);
+    const ancestorIds = [...new Set(matches.flatMap((t) => ancestorIdsOf(t.path)))];
+    const ancestors = ancestorIds.length > 0 ? await deps.db.topics.findManyByIds(user.id, ancestorIds) : [];
+    const nameById = new Map(ancestors.map((t) => [t.id, t.name]));
+
+    return c.json({
+      topics: matches.map((t) => ({
+        id: t.id,
+        subjectId: t.subjectId,
+        subjectName: t.subject.name,
+        name: t.name,
+        ancestors: ancestorIdsOf(t.path).map((id) => nameById.get(id) ?? '…'),
+      })),
     });
   });
 

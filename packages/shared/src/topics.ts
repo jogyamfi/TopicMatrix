@@ -115,3 +115,17 @@ export const topicTreeNodeSchema: z.ZodType<TopicTreeNodeView> = z.lazy(() =>
     children: z.array(topicTreeNodeSchema),
   }),
 );
+
+// GET /topics/search?q= (R4, U-11) — jump-to / pickers across every (non-archived) subject.
+// `ancestors` are the names from the root down to the topic's parent, for disambiguation.
+export const topicSearchResultSchema = z.object({
+  id: z.string(),
+  subjectId: z.string(),
+  subjectName: z.string(),
+  name: z.string(),
+  ancestors: z.array(z.string()),
+});
+export type TopicSearchResult = z.infer<typeof topicSearchResultSchema>;
+
+export const topicSearchResponseSchema = z.object({ topics: z.array(topicSearchResultSchema) });
+export type TopicSearchResponse = z.infer<typeof topicSearchResponseSchema>;

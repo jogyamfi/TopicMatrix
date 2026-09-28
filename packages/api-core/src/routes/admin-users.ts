@@ -6,8 +6,13 @@ import {
   adminUpdateUserRequestSchema,
   normaliseKey,
 } from '@topicmatrix/shared';
-import { createUserWithDefaultSettings, deleteUserAccount, type User } from '@topicmatrix/db';
-import type { AppEnv } from '../deps.js';
+import {
+  createUserWithDefaultSettings,
+  deleteUserAccount,
+  resetToTemporaryPassword,
+  type User,
+} from '@topicmatrix/db';
+import type { AppDeps, AppEnv } from '../deps.js';
 import { randomOpaqueToken } from '../auth/crypto-utils.js';
 import { parseJsonBody } from '../validation.js';
 import { recordAudit } from '../audit.js';
@@ -40,15 +45,25 @@ function withoutUndefined<T extends object>(obj: T): { [K in keyof T]?: Exclude<
 }
 
 /**
- * Admin user management (FR-1.8). An admin can never deactivate or delete their OWN account:
- * the acting admin is by definition active, so this alone guarantees at least one active admin
- * always remains to manage accounts. (Roles can't be changed through this API; if that's ever
- * added, it also needs a "not the last active admin" check.)
+ * Admin user management (FR-1.8). An admin can never deactivate, delete, demote or reset the
+ * password of their OWN account (they use Change password for the last). The acting admin is by
+ * definition active, so this guarantees at least one active admin always remains to manage
+ * accounts; `assertAnotherActiveAdmin` double-checks it for role changes regardless.
  *
  * Deliberately the only surface under /admin — this route file never touches subjects/topics/
  * sessions and never will (SRS §16 Q7: admins cannot read learner study data); see
  * index.test.ts's assertion that no such route is registered.
  */
+/** Refuses to leave the deployment without an active admin (belt and braces — see above). */
+async function assertAnotherActiveAdmin(deps: AppDeps, exceptUserId: string): Promise<void> {
+  const others = (await deps.db.users.list()).filter(
+    (u) => u.id !== exceptUserId && u.role === 'ADMIN' && u.isActive,
+  );
+  if (others.length === 0) {
+    throw new AppError('CONFLICT', 'At least one active admin must remain');
+  }
+}
+
 export function registerAdminRoutes(app: Hono<AppEnv>): void {
   app.use('/admin/*', requireAuth, requirePasswordChanged, requireAdmin);
 
@@ -107,6 +122,14 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
     if (body.isActive === false && targetId === actor.id) {
       throw new AppError('FORBIDDEN', 'You cannot deactivate your own account');
     }
+    if (body.role !== undefined && body.role !== target.role) {
+      if (targetId === actor.id) {
+        throw new AppError('FORBIDDEN', 'You cannot change your own role');
+      }
+      if (target.role === 'ADMIN') {
+        await assertAnotherActiveAdmin(deps, targetId);
+      }
+    }
 
     const updated = await deps.db.users.update(targetId, withoutUndefined(body));
     if (body.isActive === false) {
@@ -120,6 +143,27 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
       metadata: body,
     });
     return c.json({ user: toAdminUserView(updated) });
+  });
+
+  // Issues a new one-time temporary password (shown once in this response, never stored in
+  // plaintext) that must be changed at next login, and ends every existing session.
+  app.post('/admin/users/:id/reset-password', async (c) => {
+    const deps = c.get('deps');
+    const actor = getAuthUser(c);
+    const targetId = c.req.param('id');
+
+    const target = await deps.db.users.findById(targetId);
+    if (!target) {
+      throw new AppError('NOT_FOUND', 'User not found');
+    }
+    if (targetId === actor.id) {
+      throw new AppError('FORBIDDEN', 'Use Change password to change your own password');
+    }
+
+    const temporaryPassword = randomOpaqueToken(9);
+    await resetToTemporaryPassword(deps.db, targetId, await deps.passwordService.hash(temporaryPassword));
+    await recordAudit(deps, { actorId: actor.id, action: 'admin.user.reset_password', targetId });
+    return c.json({ temporaryPassword });
   });
 
   app.delete('/admin/users/:id', async (c) => {

@@ -21,6 +21,8 @@ export const queryKeys = {
   },
   subjects: {
     list: () => ['subjects'] as const,
+    /** The list including archived subjects (Subjects page "Show archived"); under the `['subjects']` prefix. */
+    listWithArchived: () => ['subjects', 'with-archived'] as const,
     detail: (subjectId: string) => ['subjects', subjectId] as const,
     tree: (subjectId: string) => ['subjects', subjectId, 'tree'] as const,
   },

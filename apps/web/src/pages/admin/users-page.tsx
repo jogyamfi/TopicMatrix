@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import { adminUpdateUserResponseSchema, adminUsersListResponseSchema, type AdminUserView } from '@topicmatrix/shared';
+import {
+  adminUpdateUserResponseSchema,
+  adminUsersListResponseSchema,
+  type AdminUserView,
+  type Role,
+} from '@topicmatrix/shared';
 import { apiFetch } from '../../lib/api-client';
 import { describeError } from '../../lib/api-error';
 import { queryKeys } from '../../lib/query-client';
@@ -28,6 +33,8 @@ import {
 } from '../../components/ui/card';
 import { CreateUserDialog } from './create-user-dialog';
 import { DeleteUserDialog } from './delete-user-dialog';
+import { ResetPasswordDialog } from './reset-password-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { useAuth } from '../../context/auth-context';
 
 export default function AdminUsersPage(): React.JSX.Element {
@@ -38,6 +45,22 @@ export default function AdminUsersPage(): React.JSX.Element {
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminUserView | null>(null);
+  const [resetTarget, setResetTarget] = useState<AdminUserView | null>(null);
+
+  const roleMutation = useMutation({
+    mutationFn: (vars: { user: AdminUserView; role: Role }) =>
+      apiFetch(`/admin/users/${vars.user.id}`, adminUpdateUserResponseSchema, {
+        method: 'PATCH',
+        body: { role: vars.role },
+      }),
+    onSuccess: async (data) => {
+      await invalidations.afterAdminUserUpdate();
+      toast({ title: `${data.user.displayName} is now ${data.user.role === 'ADMIN' ? 'an admin' : 'a learner'}` });
+    },
+    onError: (err) => {
+      toast({ title: 'Could not change role', description: describeError(err), variant: 'destructive' });
+    },
+  });
 
   const toggleActiveMutation = useMutation({
     mutationFn: (user: AdminUserView) =>
@@ -104,7 +127,24 @@ export default function AdminUsersPage(): React.JSX.Element {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{user.email}</TableCell>
                     <TableCell>
-                      <Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>{user.role}</Badge>
+                      {/* Your own role can't be changed (the server refuses too). */}
+                      {user.id === currentUser?.id ? (
+                        <Badge variant={user.role === 'ADMIN' ? 'default' : 'secondary'}>{user.role}</Badge>
+                      ) : (
+                        <Select
+                          value={user.role}
+                          onValueChange={(role) => roleMutation.mutate({ user, role: role as Role })}
+                          disabled={roleMutation.isPending}
+                        >
+                          <SelectTrigger className="h-8 w-32" aria-label={`Role for ${user.displayName}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="LEARNER">Learner</SelectItem>
+                            <SelectItem value="ADMIN">Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={user.isActive ? 'secondary' : 'destructive'}>
@@ -112,7 +152,7 @@ export default function AdminUsersPage(): React.JSX.Element {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {/* The server refuses both for your own account, so an admin can't lock
+                      {/* The server refuses these for your own account, so an admin can't lock
                           everyone out (the acting admin is always an active one). */}
                       {user.id === currentUser?.id ? null : (
                         <div className="flex justify-end gap-2">
@@ -123,6 +163,9 @@ export default function AdminUsersPage(): React.JSX.Element {
                             onClick={() => toggleActiveMutation.mutate(user)}
                           >
                             {user.isActive ? 'Disable' : 'Enable'}
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => setResetTarget(user)}>
+                            Reset password
                           </Button>
                           <Button variant="outline" size="sm" onClick={() => setDeleteTarget(user)}>
                             Delete
@@ -140,6 +183,7 @@ export default function AdminUsersPage(): React.JSX.Element {
 
       <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} />
       <DeleteUserDialog user={deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)} />
+      <ResetPasswordDialog user={resetTarget} onOpenChange={(open) => !open && setResetTarget(null)} />
     </div>
   );
 }

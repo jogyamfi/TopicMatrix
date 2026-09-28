@@ -23,7 +23,13 @@ export {
   updateTopicAndReschedule,
   updateSettingsAndReschedule,
 } from './rescheduling.js';
-export { createUserWithDefaultSettings, rotateRefreshToken } from './account-writes.js';
+export {
+  createUserWithDefaultSettings,
+  rotateRefreshToken,
+  changePasswordAndRestartSessions,
+  resetToTemporaryPassword,
+} from './account-writes.js';
+export { deleteTag } from './tag-writes.js';
 export { REVOKED_TOKEN_RETENTION_MS } from './repositories/refresh-token.js';
 export { computeSubjectTopicMetrics, computeTopicMetrics, computeTopicMetricsFromData } from './topic-metrics.js';
 export type { TopicScoreMetrics } from './topic-metrics.js';

@@ -11,6 +11,7 @@ export interface CreateUserInput {
 
 export interface UpdateUserInput {
   displayName?: string;
+  role?: 'ADMIN' | 'LEARNER';
   passwordHash?: string;
   isActive?: boolean;
   mustChangePassword?: boolean;

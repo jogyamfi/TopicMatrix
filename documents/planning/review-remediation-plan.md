@@ -282,6 +282,30 @@ launcher.
 
 ## Phase R4 — Account, admin & organisation features
 
+**Status: implemented.** Decisions taken while implementing it:
+- **Password change:** `POST /auth/change-password` now returns `{ accessToken, user }` and sets a
+  fresh refresh cookie, in one transaction that also ends every other session. A wrong current
+  password is now a 422 on `currentPassword`, not a 401: a 401 made the client treat it as an
+  expired session and refresh + retry first.
+- **Admin:** `PATCH /admin/users/:id` accepts `role`. You can't change your own role, and demoting
+  an admin requires another active admin to remain. `POST /admin/users/:id/reset-password` sets
+  `mustChangePassword` and ends the user's sessions; an admin can't reset their own password
+  (they use Change password).
+- **Archive:** archived cards show only Unarchive (no tree link, edit or delete). There is no
+  archive toggle in the edit dialog; the card action covers it.
+- **Tags:** `GET /tags/:id/topics` now returns health-view rows (score, health, next review,
+  subject name) instead of placeholder metrics. "Review this tag" is weakest-first filtered to the
+  tag.
+- **Search:** `GET /topics/search` excludes archived subjects, ranks prefix matches first, and
+  returns ancestor names. The shared `TopicCombobox` (ARIA combobox) is used by the Ctrl/⌘+K and
+  `/` palette, the launch dialog's new "A topic and its sub-topics" mode, and the Analytics
+  retention and accuracy tabs when "All subjects" is selected.
+- **Bugs found and fixed:** deleting a tag that was attached to any topic returned a **500**
+  (`TopicTag` is `onDelete: Restrict`); the delete now removes the attachments in the same
+  transaction. On the tags page, the delete control was a `span role="button"` nested inside
+  another button with `tabIndex=-1`, so it couldn't be reached from the keyboard; it is now a
+  sibling button.
+
 1. **U-1: self-service password change.** Add a "Change password" item to the user menu that
    reuses `change-password-page.tsx` in a non-forced mode (so Cancel is allowed). On success, the
    server issues a fresh access token + refresh cookie for the *current* session and revokes all
