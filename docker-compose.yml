@@ -2,9 +2,8 @@
 # PostgreSQL, the Node API and the web SPA from a clean checkout with one command
 # (`docker compose up`). This is DIFFERENT from docker-compose.dev.yml, which starts ONLY
 # PostgreSQL for a developer running the app on the host (FR-D.9) — this file containerises the
-# whole application. NOT verified with a real `docker compose up` on this machine (no Docker
-# available here) — see documents/planning/progress.md's P10 handover notes for what to check
-# first on a machine that has Docker.
+# whole application. Verified end to end in R5: from a fresh `docker compose up --build`, the full
+# E2E suite passes against http://localhost:8080 (`npm run test:e2e:docker`).
 services:
   postgres:
     image: postgres:15-alpine

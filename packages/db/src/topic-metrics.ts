@@ -1,7 +1,8 @@
 import { AppError, startOfUserDay } from '@topicmatrix/shared';
 import { computeCompetencyScore, computeHealthStatus, computeRollupScore, daysBetween } from '@topicmatrix/core';
 import type { Db } from './db.js';
-import type { StudySession, Topic } from './types.js';
+import type { SessionScoringRow } from './repositories/study-session.js';
+import type { ReviewSchedule, Topic, UserSettings } from './types.js';
 
 /**
  * Own vs aggregate competency metrics (FR-3.8) — the P4 handover's real replacement for
@@ -15,6 +16,23 @@ export interface TopicScoreMetrics {
   readonly ownHealthStatus: string | null;
   readonly aggregateHealthStatus: string | null;
 }
+
+/** The session columns metrics read — full rows or lean `SessionScoringRow`s both fit. */
+export type MetricsSession = Pick<SessionScoringRow, 'topicId' | 'studiedOn' | 'questionsAttempted' | 'accuracy' | 'confidence'>;
+/** The schedule columns metrics read. */
+export type MetricsSchedule = Pick<ReviewSchedule, 'topicId' | 'intervalDays' | 'nextReviewOn'>;
+/** The settings metrics read. */
+export type MetricsSettings = Pick<
+  UserSettings,
+  | 'timezone'
+  | 'dayStartHour'
+  | 'weightAccuracy'
+  | 'weightConfidence'
+  | 'weightRecency'
+  | 'strongThreshold'
+  | 'needsReviewThreshold'
+  | 'neglectThresholdDays'
+>;
 
 const ROLLUP_WINDOW_DAYS = 180;
 const MS_PER_DAY = 86_400_000;
@@ -34,13 +52,6 @@ function worstHealthStatus(statuses: readonly string[]): string {
   );
 }
 
-/**
- * Computes own + aggregate score/health for every topic in `topics` (expected to be every topic
- * in one subject, per `TopicRepository.listBySubject`), in two bulk queries rather than one pair
- * of queries per topic (`StudySessionRepository`/`ReviewScheduleRepository`'s `listBySubject`).
- * Aggregate metrics use the materialised `path` prefix to find each topic's descendants (§7.3),
- * the same technique `topic-tree.ts` uses for move/delete.
- */
 /** `own` is populated for every id in `topics` by the loop above it — this just avoids a banned `!`. */
 function mustGetOwn<V>(map: Map<string, V>, topicId: string): V {
   const value = map.get(topicId);
@@ -50,33 +61,30 @@ function mustGetOwn<V>(map: Map<string, V>, topicId: string): V {
   return value;
 }
 
-export async function computeSubjectTopicMetrics(
-  db: Db,
-  userId: string,
-  subjectId: string,
+/**
+ * Own + aggregate score/health for every topic in `topics` (one subject's topics), from data the
+ * caller already loaded — pure, so a bulk caller (`computeSubjectSummaries`) can load once for
+ * every subject and run this per subject in memory. `sessions`/`schedules` may include other
+ * topics' rows; only those for `topics` are used. Aggregates use the materialised `path` prefix
+ * to find each topic's descendants (§7.3), as `topic-tree.ts` does for move/delete.
+ */
+export function computeTopicMetricsFromData(
   topics: readonly Topic[],
+  sessions: readonly MetricsSession[],
+  schedules: readonly MetricsSchedule[],
+  settings: MetricsSettings,
   asOfDate: Date,
-): Promise<Map<string, TopicScoreMetrics>> {
+): Map<string, TopicScoreMetrics> {
   const result = new Map<string, TopicScoreMetrics>();
   if (topics.length === 0) {
     return result;
   }
 
-  const settings = await db.userSettings.find(userId);
-  if (!settings) {
-    throw new AppError('NOT_FOUND', 'User settings not found');
-  }
-
-  const [sessions, schedules] = await Promise.all([
-    db.studySessions.listBySubject(userId, subjectId),
-    db.reviewSchedules.listBySubject(userId, subjectId),
-  ]);
-
-  const sessionsByTopic = new Map<string, StudySession[]>();
+  const sessionsByTopic = new Map<string, MetricsSession[]>();
   for (const session of sessions) {
-    const list = sessionsByTopic.get(session.topicId) ?? [];
-    list.push(session);
-    sessionsByTopic.set(session.topicId, list);
+    const list = sessionsByTopic.get(session.topicId);
+    if (list) list.push(session);
+    else sessionsByTopic.set(session.topicId, [session]);
   }
   const scheduleByTopic = new Map(schedules.map((s) => [s.topicId, s]));
 
@@ -88,22 +96,14 @@ export async function computeSubjectTopicMetrics(
   const rollupWindowStart = new Date(asOfDate.getTime() - ROLLUP_WINDOW_DAYS * MS_PER_DAY);
   const today = startOfUserDay(asOfDate, settings.timezone, settings.dayStartHour);
 
-  const own = new Map<
-    string,
-    { score: number | null; health: string; questionsAttempted180d: number }
-  >();
+  const own = new Map<string, { score: number | null; health: string; questionsAttempted180d: number }>();
 
   for (const topic of topics) {
     const topicSessions = sessionsByTopic.get(topic.id) ?? [];
     const schedule = scheduleByTopic.get(topic.id) ?? null;
 
     const scoreResult = computeCompetencyScore({
-      sessions: topicSessions.map((s) => ({
-        studiedOn: s.studiedOn,
-        questionsAttempted: s.questionsAttempted,
-        accuracy: s.accuracy,
-        confidence: s.confidence,
-      })),
+      sessions: topicSessions,
       asOfDate,
       currentIntervalDays: schedule?.intervalDays ?? null,
       weights,
@@ -155,7 +155,33 @@ export async function computeSubjectTopicMetrics(
   return result;
 }
 
-/** Single-topic convenience wrapper — loads the topic's whole subject to compute its roll-up. */
+/**
+ * Own + aggregate metrics for every topic in `topics` (expected to be every topic in one subject,
+ * per `TopicRepository.listBySubject`), loading that subject's data in two lean bulk reads.
+ */
+export async function computeSubjectTopicMetrics(
+  db: Db,
+  userId: string,
+  _subjectId: string,
+  topics: readonly Topic[],
+  asOfDate: Date,
+): Promise<Map<string, TopicScoreMetrics>> {
+  if (topics.length === 0) {
+    return new Map();
+  }
+  const settings = await db.userSettings.find(userId);
+  if (!settings) {
+    throw new AppError('NOT_FOUND', 'User settings not found');
+  }
+  const topicIds = topics.map((t) => t.id);
+  const [sessions, schedules] = await Promise.all([
+    db.studySessions.listScoringRowsForTopics(userId, topicIds),
+    db.reviewSchedules.listByTopics(userId, topicIds),
+  ]);
+  return computeTopicMetricsFromData(topics, sessions, schedules, settings, asOfDate);
+}
+
+/** Metrics for a single topic (its own + aggregate over its subtree). */
 export async function computeTopicMetrics(
   db: Db,
   userId: string,

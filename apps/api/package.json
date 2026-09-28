@@ -9,7 +9,9 @@
     "build": "tsc -b",
     "start": "tsx src/index.ts",
     "seed:admin": "tsx src/seed-admin.ts",
-    "seed:demo": "tsx src/seed-demo.ts"
+    "seed:demo": "tsx src/seed-demo.ts",
+    "seed:perf": "tsx src/seed-perf.ts",
+    "perf:measure": "tsx src/perf-measure.ts"
   },
   "dependencies": {
     "@topicmatrix/api-core": "*",

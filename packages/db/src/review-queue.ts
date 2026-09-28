@@ -1,7 +1,7 @@
 import { AppError, startOfUserDay } from '@topicmatrix/shared';
 import { computeCompetencyScore, computeHealthStatus, daysBetween } from '@topicmatrix/core';
 import type { Db } from './db.js';
-import type { StudySession } from './types.js';
+import type { SessionScoringRow } from './repositories/study-session.js';
 
 const MS_PER_DAY = 86_400_000;
 const NEXT_7_DAYS_MS = 7 * MS_PER_DAY;
@@ -82,12 +82,13 @@ async function computeEligibleTopicItems(
   const [subjects, topics, sessions, schedules] = await Promise.all([
     db.subjects.list(userId),
     db.topics.listAllForUser(userId),
-    db.studySessions.listAllForUser(userId),
+    // Lean rows: scoring and the accuracy trend read only a few columns (R5, NF-1).
+    db.studySessions.listScoringRowsForUser(userId),
     db.reviewSchedules.listAllForUser(userId),
   ]);
 
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
-  const sessionsByTopic = new Map<string, StudySession[]>();
+  const sessionsByTopic = new Map<string, SessionScoringRow[]>();
   for (const session of sessions) {
     const list = sessionsByTopic.get(session.topicId) ?? [];
     list.push(session);
@@ -258,7 +259,7 @@ export interface ReviewSessionCaps {
 
 /** Average of the user's logged `durationMinutes` (FR-6.4's target-minutes cap estimator). */
 async function estimateMinutesPerItem(db: Db, userId: string): Promise<number> {
-  const sessions = await db.studySessions.listAllForUser(userId);
+  const sessions = await db.studySessions.listScoringRowsForUser(userId);
   const durations = sessions
     .map((s) => s.durationMinutes)
     .filter((d): d is number => d !== null && d > 0);

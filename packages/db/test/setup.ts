@@ -32,6 +32,7 @@ export function testConfig(overrides: Partial<AppConfig>): AppConfig {
     logLevel: 'error',
     trustProxyHops: 0,
     defaultTimezone: 'Europe/London',
+    cookieSecure: true,
     ...overrides,
   };
 }
@@ -52,11 +53,28 @@ function runMigrateDeploy(schemaDir: 'sqlite' | 'postgres', databaseUrl: string)
  */
 export async function setupIntegrationTest(): Promise<IntegrationTestContext> {
   if (process.env.DATABASE_PROVIDER === 'postgresql') {
-    const databaseUrl =
+    // A uniquely named schema per run, dropped afterwards — the PostgreSQL counterpart of the temp
+    // SQLite file below. Sharing one schema across runs made tests with fixed values (an email, a
+    // token hash) collide with the previous run's rows (found in R5).
+    const serverUrl =
       process.env.DATABASE_URL ?? 'postgresql://topicmatrix:topicmatrix@localhost:5432/topicmatrix';
+    const schema = `db_test_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const databaseUrl = `${serverUrl}${serverUrl.includes('?') ? '&' : '?'}schema=${schema}`;
     runMigrateDeploy('postgres', databaseUrl);
     const db = createNodeDb(testConfig({ databaseProvider: 'postgresql', databaseUrl }));
-    return { db, fixtures: createFixtures(db), provider: 'postgresql', teardown: () => db.disconnect() };
+    return {
+      db,
+      fixtures: createFixtures(db),
+      provider: 'postgresql',
+      teardown: async () => {
+        await db.disconnect();
+        execSync(`npx prisma db execute --url "${serverUrl}" --stdin`, {
+          cwd: repoRoot,
+          input: `DROP SCHEMA IF EXISTS "${schema}" CASCADE;`,
+          stdio: ['pipe', 'ignore', 'inherit'],
+        });
+      },
+    };
   }
 
   const tmpDir = mkdtempSync(path.join(tmpdir(), 'topicmatrix-test-'));

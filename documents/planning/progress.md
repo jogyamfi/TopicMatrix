@@ -1476,7 +1476,31 @@ documented exception), and `npm run test:e2e` (2 passed, real browser via Playwr
   plan's own explicit instruction that "the same Playwright suite from P10, unmodified" is what's
   expected there.
 
+## NF-1 performance measurement (R5)
 
+Measured with `npm run seed:perf -w apps/api` (20 subjects / 2,000 topics / 20,000 sessions, one
+user, schedules and snapshots derived as real writes derive them) and `npm run perf:measure -w
+apps/api` (the real Hono app in-process against that database, 3 warm-up + 20 timed requests per
+endpoint). SQLite, on the development laptop. Milliseconds:
 
+| Endpoint | p50 before | p95 before | p50 after | p95 after |
+|---|---|---|---|---|
+| `GET /subjects` | 5,790 | 5,873 | 185 | 202 |
+| `GET /review/queue` | 887 | 961 | 159 | 177 |
+| `GET /analytics/health` | 1,446 | 1,606 | 293 | 370 |
+| `GET /subjects/:id/tree` | 43 | 69 | 27 | 31 |
+| `GET /analytics/dashboard` | 247 | 359 | 179 | 184 |
+| `GET /analytics/retention?subjectId=` | 87 | 129 | 51 | 56 |
 
+NF-1 ("dashboard and topic tree endpoints < 300 ms p95") now passes; the dashboard was over it
+(359 ms) before. What changed (see `review-remediation-plan.md` R5): bulk reads select only the
+columns scoring needs (`SessionScoringRow`; building full Prisma rows for 20,000 sessions was the
+dominant cost), `/subjects` makes one bulk pass for all subjects instead of ~6 queries per subject
+run concurrently (which on SQLite made them contend), the dashboard loads one year of sessions
+plus the distinct study days, the health view reads only each topic's latest two snapshot scores,
+and subject retention reads snapshots in one query instead of one per topic.
+
+Not done: list virtualisation for the Topic Health table. At 370 ms p95 server-side for 2,000
+rows the endpoint is acceptable; it's worth revisiting only if the browser-side rendering of that
+table measures slow.
 

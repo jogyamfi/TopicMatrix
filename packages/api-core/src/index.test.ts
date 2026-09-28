@@ -8,7 +8,8 @@ const dbCache = createProcessDbCache();
 afterAll(() => dbCache.disconnectAll());
 const createDb = dbCache.getDb.bind(dbCache);
 
-function testDeps() {
+// These are pure unit tests: the database is never actually reached — `/readyz`'s ping is stubbed.
+function testDeps(ping: () => Promise<void> = async () => {}) {
   return buildDeps(
     {
       DATABASE_PROVIDER: 'sqlite',
@@ -16,39 +17,56 @@ function testDeps() {
       JWT_SECRET: 'a'.repeat(32),
       NODE_ENV: 'test',
     },
-    { createDb, getClientIp: () => '127.0.0.1', createPasswordService },
+    { createDb: (config) => ({ ...createDb(config), ping }), getClientIp: () => '127.0.0.1', createPasswordService },
   );
 }
 
 describe('createApp health routes', () => {
   it('GET /healthz returns ok', async () => {
-    const app = createApp(testDeps);
+    const app = createApp(() => testDeps());
     const res = await app.request('/healthz');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok' });
   });
 
-  it('GET /readyz returns ok and the configured database provider', async () => {
-    const app = createApp(testDeps);
+  it('GET /readyz returns ok and the configured database provider once the database answers', async () => {
+    const app = createApp(() => testDeps());
     const res = await app.request('/readyz');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok', databaseProvider: 'sqlite' });
   });
 
+  it('GET /readyz returns 503 when the database cannot be reached (R5)', async () => {
+    const app = createApp(() => testDeps(() => Promise.reject(new Error('connection refused'))));
+    const res = await app.request('/readyz');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ status: 'unavailable', databaseProvider: 'sqlite' });
+  });
+
   it('attaches an x-request-id header, propagating an incoming one', async () => {
-    const app = createApp(testDeps);
+    const app = createApp(() => testDeps());
     const res = await app.request('/healthz', { headers: { 'x-request-id': 'test-id-123' } });
     expect(res.headers.get('x-request-id')).toBe('test-id-123');
   });
 
+  it('replaces an inbound x-request-id that does not look like an id (R5)', async () => {
+    const app = createApp(() => testDeps());
+    for (const forged of ['has spaces', 'x'.repeat(65), 'semi;colon=1','{"json":true}']) {
+      const res = await app.request('/healthz', { headers: { 'x-request-id': forged } });
+      const echoed = res.headers.get('x-request-id');
+      expect(echoed).not.toBe(forged);
+      expect(echoed).toMatch(/^[0-9A-Z]{26}$/); // a fresh ULID
+    }
+  });
+
   it('generates an x-request-id header when none is supplied', async () => {
-    const app = createApp(testDeps);
+    const app = createApp(() => testDeps());
     const res = await app.request('/healthz');
     expect(res.headers.get('x-request-id')).toBeTruthy();
   });
 
   it('applies security headers (CSP, HSTS, X-Content-Type-Options, Referrer-Policy) — SEC-6', async () => {
-    const app = createApp(testDeps);
+    const app = createApp(() => testDeps());
     const res = await app.request('/healthz');
     expect(res.headers.get('content-security-policy')).toContain("default-src 'self'");
     expect(res.headers.get('strict-transport-security')).toContain('max-age=');

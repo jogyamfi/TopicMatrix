@@ -15,6 +15,7 @@ function config(databaseUrl: string): AppConfig {
     logLevel: 'error',
     trustProxyHops: 0,
     defaultTimezone: 'Europe/London',
+    cookieSecure: true,
   };
 }
 

@@ -36,6 +36,9 @@ const envSchema = z.object({
     .string()
     .refine(isValidTimezone, { message: 'DEFAULT_TIMEZONE must be a valid IANA timezone' })
     .default('Europe/London'),
+  // The refresh cookie is `Secure` (HTTPS-only, except on localhost). `false` is an escape hatch
+  // for trying the stack over plain http on a LAN address — refused when NODE_ENV=production.
+  COOKIE_SECURE: z.enum(['true', 'false']).default('true'),
 });
 
 export type RawEnv = Record<string, string | undefined>;
@@ -52,6 +55,7 @@ export interface AppConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   trustProxyHops: number;
   defaultTimezone: string;
+  cookieSecure: boolean;
 }
 
 export class ConfigError extends Error {
@@ -81,6 +85,13 @@ export function parseConfig(env: RawEnv): AppConfig {
     );
   }
 
+  if (data.COOKIE_SECURE === 'false' && data.NODE_ENV === 'production') {
+    throw new ConfigError(
+      'COOKIE_SECURE=false is not allowed when NODE_ENV=production — serve the app over HTTPS instead ' +
+        '(see documents/guides/deployment.md).',
+    );
+  }
+
   return {
     databaseProvider: data.DATABASE_PROVIDER,
     databaseUrl: data.DATABASE_URL,
@@ -96,5 +107,6 @@ export function parseConfig(env: RawEnv): AppConfig {
     logLevel: data.LOG_LEVEL,
     trustProxyHops: data.TRUST_PROXY_HOPS,
     defaultTimezone: data.DEFAULT_TIMEZONE,
+    cookieSecure: data.COOKIE_SECURE === 'true',
   };
 }

@@ -26,6 +26,8 @@ export interface ReviewScheduleRepository {
     userId: string,
     opts?: { skip?: number; take?: number },
   ): Promise<ReviewSchedule[]>;
+  /** The schedules of the listed topics (the user's own only), in one query. */
+  listByTopics(userId: string, topicIds: readonly string[]): Promise<ReviewSchedule[]>;
   /** One schedule per topic (§6.1) — create-or-replace, as scheduling recalculation always does (FR-4.3). */
   upsert(userId: string, topicId: string, input: UpsertReviewScheduleInput): Promise<ReviewSchedule>;
 }
@@ -45,6 +47,8 @@ export function createReviewScheduleRepository(client: PrismaClientOrTx): Review
     },
     listBySubject: (userId, subjectId) =>
       client.reviewSchedule.findMany({ where: { topic: { subjectId, subject: { userId } } } }),
+    listByTopics: (userId, topicIds) =>
+      client.reviewSchedule.findMany({ where: { topicId: { in: [...topicIds] }, topic: { subject: { userId } } } }),
     listAllForUser: (userId, opts) =>
       client.reviewSchedule.findMany({
         where: { topic: { subject: { userId } } },

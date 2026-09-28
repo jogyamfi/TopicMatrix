@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 // Full acceptance walkthrough (delivery-plan.md P10 task 6): first-run admin seed \u2192 login \u2192
@@ -11,6 +11,15 @@ const SEEDED_PASSWORD = 'E2eAdminPass123!';
 const NEW_PASSWORD = 'NewSecurePassword456!';
 
 test.describe.configure({ mode: 'serial' });
+
+/**
+ * Asserts a toast is showing. Radix Toast briefly renders a visually-hidden copy of each new
+ * toast for screen-reader announcement, so a plain getByText can match twice (seen against the
+ * faster production build) — this checks the visible toast only.
+ */
+async function expectToast(page: Page, text: string): Promise<void> {
+  await expect(page.getByRole('status').filter({ hasText: text }).first()).toBeVisible();
+}
 
 test('first-run admin seed through export (P10 acceptance criteria)', async ({ page }) => {
   await test.step('login with the seeded temporary password', async () => {
@@ -124,7 +133,7 @@ test('first-run admin seed through export (P10 acceptance criteria)', async ({ p
     await page.getByRole('link', { name: 'Settings' }).click();
     await page.getByLabel('Day starts at (hour, 0-23)').fill('5');
     await page.getByRole('button', { name: 'Save settings' }).click();
-    await expect(page.getByText('Settings saved')).toBeVisible();
+    await expectToast(page, 'Settings saved');
   });
 });
 
@@ -170,7 +179,7 @@ test.describe('on a device in another timezone', () => {
     const banner = page.getByRole('region', { name: 'Timezone' });
     await expect(banner).toContainText('America/New_York');
     await banner.getByRole('button', { name: 'Use America/New_York' }).click();
-    await expect(page.getByText('Now using America/New_York.')).toBeVisible();
+    await expectToast(page, 'Now using America/New_York.');
     await expect(banner).toBeHidden();
   });
 });

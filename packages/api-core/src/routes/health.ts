@@ -5,9 +5,16 @@ import type { AppEnv } from '../deps.js';
 export function registerHealthRoutes(app: Hono<AppEnv>): void {
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
 
-  app.get('/readyz', (c) => {
+  // Liveness (`/healthz`) says the process is up; readiness also proves the database answers, so a
+  // load balancer or `docker compose` health check stops routing to an API that can't serve.
+  app.get('/readyz', async (c) => {
     const deps = c.get('deps');
-    // A real dependency check (DB ping) lands once packages/db is a real client at P1.
+    try {
+      await deps.db.ping();
+    } catch (err) {
+      deps.logger.error('readiness_check_failed', { message: err instanceof Error ? err.message : String(err) });
+      return c.json({ status: 'unavailable', databaseProvider: deps.config.databaseProvider }, 503);
+    }
     return c.json({ status: 'ok', databaseProvider: deps.config.databaseProvider });
   });
 }

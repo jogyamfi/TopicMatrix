@@ -7,15 +7,15 @@ import {
   type ScoringWeights,
 } from '@topicmatrix/core';
 import type { Db } from './db.js';
-import type { CompetencySnapshot, StudySession } from './types.js';
+import type { CompetencySnapshot } from './types.js';
 
 const MS_PER_DAY = 86_400_000;
 const ACTIVITY_CALENDAR_DAYS = 365;
 /** Caps the number of sample points a retention/decay series returns, regardless of date range. */
 const MAX_SAMPLE_POINTS = 400;
 
-function groupByTopic(sessions: readonly StudySession[]): Map<string, StudySession[]> {
-  const map = new Map<string, StudySession[]>();
+function groupByTopic<T extends { topicId: string }>(sessions: readonly T[]): Map<string, T[]> {
+  const map = new Map<string, T[]>();
   for (const session of sessions) {
     const list = map.get(session.topicId) ?? [];
     list.push(session);
@@ -87,18 +87,23 @@ export async function computeDashboardAnalytics(
   asOfDate: Date,
 ): Promise<DashboardAnalytics> {
   const settings = await requireSettings(db, userId);
-  const sessions = await db.studySessions.listAllForUser(userId);
   const today = startOfUserDay(asOfDate, settings.timezone, settings.dayStartHour);
+  const calendarStartMs = today.getTime() - (ACTIVITY_CALENDAR_DAYS - 1) * MS_PER_DAY;
+
+  // Only the calendar's year of sessions is loaded (lean rows); the streak needs every study day
+  // ever, but only the distinct dates — not the sessions (R5, NF-1).
+  const [sessions, studyDays] = await Promise.all([
+    db.studySessions.listScoringRowsForUser(userId, { from: new Date(calendarStartMs) }),
+    db.studySessions.listStudyDaysForUser(userId),
+  ]);
 
   const todaysSessions = sessions.filter((s) => s.studiedOn.getTime() === today.getTime());
   const questionsAttempted = todaysSessions.reduce((sum, s) => sum + s.questionsAttempted, 0);
   const questionsCorrect = todaysSessions.reduce((sum, s) => sum + s.questionsCorrect, 0);
   const minutesStudied = todaysSessions.reduce((sum, s) => sum + (s.durationMinutes ?? 0), 0);
 
-  const activeDayTimes = new Set(sessions.map((s) => s.studiedOn.getTime()));
-  const streak = computeStreak([...activeDayTimes].map((t) => new Date(t)), today);
+  const streak = computeStreak(studyDays, today);
 
-  const calendarStartMs = today.getTime() - (ACTIVITY_CALENDAR_DAYS - 1) * MS_PER_DAY;
   const countByDayMs = new Map<number, number>();
   for (const session of sessions) {
     const t = session.studiedOn.getTime();
@@ -300,12 +305,14 @@ export async function computeTopicHealthView(
   opts?: { subjectId?: string },
 ): Promise<TopicHealthRow[]> {
   const settings = await requireSettings(db, userId);
-  const [subjects, allTopics, allSessions, allSchedules, allSnapshots] = await Promise.all([
+  // Lean session rows, and only each topic's latest two snapshot scores (all the ▲▼ trend needs)
+  // rather than every snapshot ever (R5, NF-1).
+  const [subjects, allTopics, allSessions, allSchedules, latestScores] = await Promise.all([
     db.subjects.list(userId),
     db.topics.listAllForUser(userId),
-    db.studySessions.listAllForUser(userId),
+    db.studySessions.listScoringRowsForUser(userId),
     db.reviewSchedules.listAllForUser(userId),
-    db.competencySnapshots.listAllForUser(userId),
+    db.competencySnapshots.listLatestTwoScoresForUser(userId),
   ]);
 
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
@@ -320,12 +327,6 @@ export async function computeTopicHealthView(
 
   const sessionsByTopic = groupByTopic(allSessions);
   const scheduleByTopic = new Map(allSchedules.map((s) => [s.topicId, s]));
-  const snapshotsByTopic = new Map<string, CompetencySnapshot[]>();
-  for (const snapshot of allSnapshots) {
-    const list = snapshotsByTopic.get(snapshot.topicId) ?? [];
-    list.push(snapshot);
-    snapshotsByTopic.set(snapshot.topicId, list);
-  }
 
   return topics.map((topic) => {
     const subject = subjectById.get(topic.subjectId);
@@ -373,15 +374,12 @@ export async function computeTopicHealthView(
       neglectThresholdDays: settings.neglectThresholdDays,
     });
 
-    const snapshots = (snapshotsByTopic.get(topic.id) ?? []).slice().sort(
-      (a, b) => b.capturedOn.getTime() - a.capturedOn.getTime(),
-    );
-    const [latestSnapshot, previousSnapshot] = snapshots;
+    const [latestScore, previousScore] = latestScores.get(topic.id) ?? [undefined, undefined];
     const reviewTrend: ReviewTrend =
-      latestSnapshot && previousSnapshot
-        ? latestSnapshot.score > previousSnapshot.score
+      latestScore !== undefined && previousScore !== undefined
+        ? latestScore > previousScore
           ? 'up'
-          : latestSnapshot.score < previousSnapshot.score
+          : latestScore < previousScore
             ? 'down'
             : 'flat'
         : null;
@@ -484,9 +482,14 @@ export async function computeRetentionSeries(
     return { events: [], projection: [] };
   }
 
-  const perTopicSnapshots = await Promise.all(
-    topicIds.map((topicId) => db.competencySnapshots.listByTopic(userId, topicId)),
-  );
+  // One query for every topic's snapshots (was one per topic — 100 queries for a subject), then
+  // regrouped per topic (R5, NF-1).
+  const snapshotsForTopics =
+    'topicId' in target
+      ? await db.competencySnapshots.listByTopic(userId, target.topicId)
+      : await db.competencySnapshots.listByTopics(userId, topicIds);
+  const snapshotsByTopic = groupByTopic(snapshotsForTopics);
+  const perTopicSnapshots = topicIds.map((topicId) => snapshotsByTopic.get(topicId) ?? []);
   const allSnapshots = perTopicSnapshots.flat().sort((a, b) => a.capturedOn.getTime() - b.capturedOn.getTime());
   if (allSnapshots.length === 0) {
     return { events: [], projection: [] };

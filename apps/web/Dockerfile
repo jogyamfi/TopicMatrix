@@ -1,6 +1,4 @@
 # Self-hosted deployment target (T2/NF-11) — build context is the REPO ROOT (npm workspaces).
-# NOT verified with a real `docker build`/`docker compose up` on this machine (no Docker
-# available here) — see documents/planning/progress.md's P10 handover notes.
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -17,5 +15,6 @@ RUN npm run build -w apps/web
 
 FROM nginx:1.27-alpine AS runtime
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/web/nginx-security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

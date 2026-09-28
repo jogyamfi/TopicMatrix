@@ -25,6 +25,13 @@ export interface CompetencySnapshotRepository {
     opts?: { skip?: number; take?: number },
   ): Promise<CompetencySnapshot[]>;
   create(userId: string, topicId: string, input: CreateCompetencySnapshotInput): Promise<CompetencySnapshot>;
+  /** Every snapshot for the listed topics (the user's own only), oldest first — one query (R5). */
+  listByTopics(userId: string, topicIds: readonly string[]): Promise<CompetencySnapshot[]>;
+  /**
+   * Each topic's latest two snapshot scores — the ▲▼ review trend — without loading every
+   * snapshot the user has (R5).
+   */
+  listLatestTwoScoresForUser(userId: string): Promise<Map<string, [number, number | undefined]>>;
 }
 
 export function createCompetencySnapshotRepository(
@@ -57,6 +64,28 @@ export function createCompetencySnapshotRepository(
         ...(opts?.skip !== undefined ? { skip: opts.skip } : {}),
         ...(opts?.take !== undefined ? { take: opts.take } : {}),
       }),
+    listByTopics: (userId, topicIds) =>
+      client.competencySnapshot.findMany({
+        where: { topicId: { in: [...topicIds] }, topic: { subject: { userId } } },
+        orderBy: { capturedOn: 'asc' },
+      }),
+    listLatestTwoScoresForUser: async (userId) => {
+      const rows = await client.competencySnapshot.findMany({
+        where: { topic: { subject: { userId } } },
+        select: { topicId: true, capturedOn: true, score: true },
+        orderBy: [{ topicId: 'asc' }, { capturedOn: 'desc' }],
+      });
+      const latest = new Map<string, [number, number | undefined]>();
+      for (const row of rows) {
+        const entry = latest.get(row.topicId);
+        if (!entry) {
+          latest.set(row.topicId, [row.score, undefined]);
+        } else if (entry[1] === undefined) {
+          entry[1] = row.score;
+        }
+      }
+      return latest;
+    },
     create: async (userId, topicId, input) => {
       await assertOwned(userId, topicId);
       return client.competencySnapshot.create({ data: { topicId, ...input } });

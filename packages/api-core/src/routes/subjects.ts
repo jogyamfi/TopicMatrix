@@ -9,7 +9,7 @@ import {
   deleteSubjectCascade,
   updateSubjectAndReschedule,
   computeSubjectTopicMetrics,
-  computeSubjectSummary,
+  computeSubjectSummaries,
   type Subject,
 } from '@topicmatrix/db';
 import type { AppEnv } from '../deps.js';
@@ -56,15 +56,11 @@ export function registerSubjectRoutes(app: Hono<AppEnv>): void {
     const subjects = await deps.db.subjects.list(user.id, { includeArchived });
 
     // Topic count / aggregate competency / due-today / last-activity for each subject card
-    // (FR-2.5, P7 task 1) — computed per subject, not batched across subjects, since each is a
-    // small, independent bulk read (topics/sessions/schedules scoped to one subject).
-    const withSummary = await Promise.all(
-      subjects.map(async (subject) => ({
-        view: toSubjectView(subject),
-        summary: await computeSubjectSummary(deps.db, user.id, subject.id, deps.clock()),
-      })),
-    );
-    return c.json({ subjects: withSummary.map(({ view, summary }) => ({ ...view, summary })) });
+    // (FR-2.5, P7 task 1) — one bulk pass over all the subjects (R5, NF-1).
+    const summaries = await computeSubjectSummaries(deps.db, user.id, subjects, deps.clock());
+    return c.json({
+      subjects: subjects.map((subject) => ({ ...toSubjectView(subject), summary: summaries.get(subject.id) })),
+    });
   });
 
   app.post('/subjects', async (c) => {

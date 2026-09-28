@@ -24,6 +24,7 @@
     "test:integration:pg": "npm run db:generate-schemas && cross-env DATABASE_PROVIDER=postgresql vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:docker": "playwright test --config playwright.docker.config.ts",
     "audit": "node scripts/check-audit.mjs",
     "db:generate-schemas": "tsx scripts/generate-schemas.ts",
     "db:generate": "node scripts/db-generate.mjs",
